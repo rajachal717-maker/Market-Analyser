@@ -11,6 +11,7 @@ from strategy import calculate_portfolio_weights
 
 # Groq and LangChain Agent Imports
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 load_dotenv()
@@ -239,7 +240,6 @@ with tab1:
     with st.chat_message("assistant", avatar="🤖"):
       with st.spinner("Processing analysis..."):
         try:
-          # Pull API key securely from Streamlit secrets or environment variables
           api_key = None
           try:
             api_key = st.secrets.get("GROQ_API_KEY")
@@ -260,8 +260,21 @@ with tab1:
                 temperature=0.1,
                 groq_api_key=api_key,
             )
-            context_prompt = f"You are a professional senior quantitative analyst assistant. Respond concisely and professionally to: {prompt}"
-            response_msg = chat_llm.invoke(context_prompt).content
+
+            messages = [
+                SystemMessage(
+                    content=(
+                        "You are J.A.R.V.I.S., an advanced institutional"
+                        " quantitative trading assistant. Provide precise,"
+                        " technical, and data-driven market analysis. Do not"
+                        " include knowledge-cutoff disclaimers, standard AI"
+                        " boilerplate, or financial advice warnings."
+                    )
+                ),
+                HumanMessage(content=prompt),
+            ]
+
+            response_msg = chat_llm.invoke(messages).content
 
             st.markdown(response_msg)
             st.session_state.messages.append(
