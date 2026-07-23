@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 import pandas as pd
 import streamlit as st
 
@@ -33,23 +34,19 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Import Google Font */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-    /* Global Theme Overrides */
     html, body, [class*="css"] {
         font-family: 'Inter', sans-serif;
         background-color: #0b0f19;
         color: #f0f6fc;
     }
 
-    /* Main Container Padding Adjustment */
     .block-container {
         padding-top: 2rem;
         padding-bottom: 2rem;
     }
 
-    /* Sidebar Styling */
     [data-testid="stSidebar"] {
         background-color: #111827;
         border-right: 1px solid #1f2937;
@@ -60,7 +57,6 @@ st.markdown(
         font-size: 13px;
     }
 
-    /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #111827;
@@ -88,14 +84,12 @@ st.markdown(
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
     }
 
-    /* Typography */
     h1, h2, h3 {
         color: #f8fafc !important;
         font-weight: 700;
         letter-spacing: -0.025em;
     }
 
-    /* Custom Button Styling */
     .stButton>button {
         background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
         color: #ffffff;
@@ -112,7 +106,6 @@ st.markdown(
         border-color: transparent;
     }
 
-    /* Inputs & Selectboxes */
     .stTextInput>div>div>input, .stSelectbox>div>div>div {
         background-color: #1f2937;
         color: #f9fafb;
@@ -120,12 +113,7 @@ st.markdown(
         border-radius: 8px;
         padding: 6px 12px;
     }
-    .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus {
-        border-color: #2563eb;
-        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
-    }
 
-    /* Metrics Cards Container styling */
     [data-testid="stMetric"] {
         background-color: #111827;
         border: 1px solid #1f2937;
@@ -144,7 +132,6 @@ st.markdown(
         font-weight: 700 !important;
     }
 
-    /* Dataframes & Tables */
     [data-testid="stDataFrame"] {
         border: 1px solid #1f2937;
         border-radius: 8px;
@@ -252,18 +239,36 @@ with tab1:
     with st.chat_message("assistant", avatar="🤖"):
       with st.spinner("Processing analysis..."):
         try:
-          chat_llm = ChatGroq(
-              model="llama-3.1-8b-instant", temperature=0.1, max_retries=2
-          )
-          context_prompt = f"You are a professional senior quantitative analyst assistant. Respond concisely and professionally to: {prompt}"
-          response_msg = chat_llm.invoke(context_prompt).content
+          # Pull API key securely from Streamlit secrets or environment variables
+          api_key = None
+          try:
+            api_key = st.secrets.get("GROQ_API_KEY")
+          except Exception:
+            pass
 
-          st.markdown(response_msg)
-          st.session_state.messages.append(
-              {"role": "assistant", "content": response_msg}
-          )
+          if not api_key:
+            api_key = os.environ.get("GROQ_API_KEY")
+
+          if not api_key:
+            st.error(
+                "GROQ_API_KEY is missing. Please configure it in Streamlit Cloud"
+                " Secrets or your local environment."
+            )
+          else:
+            chat_llm = ChatGroq(
+                model="llama-3.1-8b-instant",
+                temperature=0.1,
+                groq_api_key=api_key,
+            )
+            context_prompt = f"You are a professional senior quantitative analyst assistant. Respond concisely and professionally to: {prompt}"
+            response_msg = chat_llm.invoke(context_prompt).content
+
+            st.markdown(response_msg)
+            st.session_state.messages.append(
+                {"role": "assistant", "content": response_msg}
+            )
         except Exception as e:
-          err_msg = f"API connection error: {e}"
+          err_msg = f"API connection error (Status 400/Request Failed): {e}"
           st.error(err_msg)
           st.session_state.messages.append(
               {"role": "assistant", "content": err_msg}
