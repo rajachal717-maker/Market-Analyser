@@ -2,9 +2,7 @@ from datetime import datetime, timedelta
 import os
 import pandas as pd
 import streamlit as st
-import streamlit_authenticator as stauth
-from yaml.loader import SafeLoader
-import yaml
+from supabase import Client, create_client
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(
@@ -13,33 +11,123 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- 1. AUTHENTICATION SETUP ---
-with open('config.yaml') as file:
-  config = yaml.load(file, Loader=SafeLoader)
+# --- 1. SUPABASE CONNECTION SETUP ---
 
-authenticator = stauth.Authenticate(
-    config['credentials'],
-    config['cookie']['name'],
-    config['cookie']['key'],
-    config['cookie']['expiry_days'],
-)
 
-# Render login component and read from session state safely
-authenticator.login(location='main')
+@st.cache_resource
+def init_supabase() -> Client:
+  url = st.secrets.get("SUPABASE_URL") or os.environ.get("SUPABASE_URL")
+  key = st.secrets.get("SUPABASE_KEY") or os.environ.get("SUPABASE_KEY")
+  return create_client(url, key)
 
-authentication_status = st.session_state.get('authentication_status')
-name = st.session_state.get('name')
-username = st.session_state.get('username')
 
-# --- 2. LOGIN GATEKEEPER LOGIC ---
-if authentication_status == False:
-  st.error('Incorrect username or password.')
-elif authentication_status == None:
-  st.warning(
-      'Please enter your credentials below to access the secure terminal.'
+supabase = init_supabase()
+
+# --- 2. AUTHENTICATION UI & GATEKEEPER ---
+if "user" not in st.session_state:
+  st.session_state.user = None
+
+if not st.session_state.user:
+  # Professional styling specifically for the login/signup portal
+  st.markdown(
+      """
+      <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+      html, body, [class*="css"] {
+          font-family: 'Inter', sans-serif;
+          background-color: #0b0f19;
+          color: #f0f6fc;
+      }
+      .block-container {
+          padding-top: 4rem;
+          max-width: 600px;
+      }
+      .stButton>button {
+          background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+          color: #ffffff;
+          border: none;
+          border-radius: 8px;
+          font-weight: 600;
+          padding: 0.6rem 1.2rem;
+          box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+          transition: all 0.2s ease;
+      }
+      .stButton>button:hover {
+          background: linear-gradient(135deg, #1d4ed8 100%, #1e40af 100%);
+          box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+      }
+      .stTextInput>div>div>input {
+          background-color: #1f2937;
+          color: #f9fafb;
+          border: 1px solid #374151;
+          border-radius: 8px;
+          padding: 8px 12px;
+      }
+      </style>
+  """,
+      unsafe_allow_html=True,
   )
-  st.stop()  # Halts execution here so the dashboard remains locked until login
-elif authentication_status == True:
+
+  st.markdown(
+      "<h2 style='text-align: center; color: #f8fafc; margin-bottom:"
+      " 5px;'>⚡ TERMINAL ACCESS PORTAL</h2>",
+      unsafe_allow_html=True,
+  )
+  st.markdown(
+      "<p style='text-align: center; color: #9ca3af; font-size: 14px; margin-bottom:"
+      " 30px;'>Authenticate securely to access quantitative pipelines and"
+      " neural models.</p>",
+      unsafe_allow_html=True,
+  )
+
+  auth_tab1, auth_tab2 = st.tabs(["🔐 Login", "📝 Sign Up"])
+
+  with auth_tab1:
+    with st.form("login_form"):
+      login_email = st.text_input("Email Address")
+      login_password = st.text_input("Password", type="password")
+      st.markdown("")
+      login_btn = st.form_submit_button(
+          "Authenticate Session", use_container_width=True
+      )
+
+      if login_btn:
+        try:
+          response = supabase.auth.sign_in_with_password({
+              "email": login_email,
+              "password": login_password,
+          })
+          st.session_state.user = response.user
+          st.success("Authentication successful! Initializing terminal...")
+          st.rerun()
+        except Exception as e:
+          st.error(f"Login failed: {e}")
+
+  with auth_tab2:
+    with st.form("signup_form"):
+      signup_email = st.text_input("New Email Address")
+      signup_password = st.text_input("Choose Secure Password", type="password")
+      st.markdown("")
+      signup_btn = st.form_submit_button(
+          "Register Account", use_container_width=True
+      )
+
+      if signup_btn:
+        try:
+          response = supabase.auth.sign_up({
+              "email": signup_email,
+              "password": signup_password,
+          })
+          st.success(
+              "Account registered successfully! Please check your email inbox to"
+              " verify your account before logging in."
+          )
+        except Exception as e:
+          st.error(f"Registration failed: {e}")
+
+  st.stop()  # Locks the rest of the application until authenticated
+
+else:
   # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
   from backtester import run_backtest
   from data_loader import fetch_stock_data
@@ -61,7 +149,7 @@ elif authentication_status == True:
   except ImportError:
     search_available = False
 
-  # --- 4. PROFESSIONAL CSS STYLING ENGINE ---
+  # --- 4. PROFESSIONAL CSS STYLING ENGINE (DASHBOARD) ---
   st.markdown(
       """
       <style>
@@ -187,9 +275,14 @@ elif authentication_status == True:
   )
   st.sidebar.markdown("---")
 
-  # Sidebar Logout Widget & Operator Info
-  authenticator.logout('Logout', 'sidebar')
-  st.sidebar.markdown(f"**Operator:** {name}")
+  # Operator Info & Logout Widget
+  user_email = st.session_state.user.email
+  st.sidebar.markdown(f"**Operator:** `{user_email}`")
+  if st.sidebar.button("Terminate Session", use_container_width=True):
+    supabase.auth.sign_out()
+    st.session_state.user = None
+    st.rerun()
+
   st.sidebar.markdown("---")
 
   ticker_input = st.sidebar.text_input(
