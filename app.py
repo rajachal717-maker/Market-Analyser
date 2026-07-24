@@ -24,8 +24,12 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days'],
 )
 
-# Corrected login call for newer package versions
-name, authentication_status, username = authenticator.login(location='main')
+# Render login component and read from session state safely
+authenticator.login(location='main')
+
+authentication_status = st.session_state.get('authentication_status')
+name = st.session_state.get('name')
+username = st.session_state.get('username')
 
 # --- 2. LOGIN GATEKEEPER LOGIC ---
 if authentication_status == False:
