@@ -1,0 +1,10 @@
+credentials:
+  usernames:
+    admin:
+      email: admin@example.com
+      name: Administrator
+      password: "$2b$12$YKD6k228UeUCcXLQMsc2gO92fayhEJWZYaiuPuMZysY/6zSR8l9Vm" # We will fill this with a hashed password shortly
+cookie:
+  name: 'market_analyser_auth'
+  key: '71369a1269b4b06165d814c504c7004894663ba310b6fbea363b61ffefe854fe'
+  expiry_days: 30
