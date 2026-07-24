@@ -6,6 +6,13 @@ import streamlit_authenticator as stauth
 from yaml.loader import SafeLoader
 import yaml
 
+# Page Configuration (Must be the first Streamlit command)
+st.set_page_config(
+    page_title="Institutional Quant & Intelligence Terminal",
+    page_icon="⚡",
+    layout="wide",
+)
+
 # --- 1. AUTHENTICATION SETUP ---
 with open('config.yaml') as file:
   config = yaml.load(file, Loader=SafeLoader)
@@ -17,15 +24,19 @@ authenticator = stauth.Authenticate(
     config['cookie']['expiry_days'],
 )
 
-name, authentication_status, username = authenticator.login('Login', 'main')
+# Corrected login call for newer package versions
+name, authentication_status, username = authenticator.login(location='main')
 
+# --- 2. LOGIN GATEKEEPER LOGIC ---
 if authentication_status == False:
   st.error('Incorrect username or password.')
 elif authentication_status == None:
-  st.warning('Please enter your credentials to access the secure terminal.')
-  st.stop()  # Stops execution here so the dashboard remains locked until login
+  st.warning(
+      'Please enter your credentials below to access the secure terminal.'
+  )
+  st.stop()  # Halts execution here so the dashboard remains locked until login
 elif authentication_status == True:
-  # --- 2. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
+  # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
   from backtester import run_backtest
   from data_loader import fetch_stock_data
   from risk_manager import check_portfolio_risk
@@ -46,13 +57,7 @@ elif authentication_status == True:
   except ImportError:
     search_available = False
 
-  # --- 3. PAGE CONFIGURATION & STYLING ---
-  st.set_page_config(
-      page_title="Institutional Quant & Intelligence Terminal",
-      page_icon="⚡",
-      layout="wide",
-  )
-
+  # --- 4. PROFESSIONAL CSS STYLING ENGINE ---
   st.markdown(
       """
       <style>
@@ -170,7 +175,7 @@ elif authentication_status == True:
     return cleaned.upper()
 
 
-  # --- 4. SIDEBAR CONFIGURATION ---
+  # --- 5. SIDEBAR CONFIGURATION ---
   st.sidebar.markdown(
       "<h3 style='color: #60a5fa; font-size: 16px; margin-bottom: 0px;'>⚡"
       " TERMINAL CONFIG</h3>",
@@ -178,7 +183,7 @@ elif authentication_status == True:
   )
   st.sidebar.markdown("---")
 
-  # Sidebar Logout Widget
+  # Sidebar Logout Widget & Operator Info
   authenticator.logout('Logout', 'sidebar')
   st.sidebar.markdown(f"**Operator:** {name}")
   st.sidebar.markdown("---")
@@ -202,7 +207,7 @@ elif authentication_status == True:
       "Run Quantitative Model", use_container_width=True
   )
 
-  # --- 5. MAIN APPLICATION HEADER ---
+  # --- 6. MAIN APPLICATION HEADER ---
   col_h1, col_h2 = st.columns([3, 1])
   with col_h1:
     st.title("Institutional Portfolio & Intelligence Terminal")
@@ -224,7 +229,7 @@ elif authentication_status == True:
 
   st.markdown("---")
 
-  # --- 6. NAVIGATION TABS LAYOUT ---
+  # --- 7. NAVIGATION TABS LAYOUT ---
   tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
       [
           "💬 AI Analyst Console",
