@@ -1,44 +1,57 @@
-from datetime import datetime, timedelta
-import pandas as pd
 import yfinance as yf
+import pandas as pd
+import streamlit as st
 
+@st.cache_data(ttl=3600)
+def fetch_stock_data(tickers, start_date, end_date):
+    formatted_tickers = []
+    
+    # 1. Format tickers for Yahoo Finance (force .NS for Indian stocks)
+    for t in tickers:
+        t_clean = t.strip().upper()
+        
+        # Handle accidental hyphens (e.g., if you type V-MART instead of VMART)
+        if t_clean == "V-MART":
+            t_clean = "VMART"
+            
+        # If it doesn't already have an exchange suffix, force .NS
+        if "." not in t_clean:
+            t_clean = f"{t_clean}.NS"
+            
+        formatted_tickers.append(t_clean)
+        
+    if not formatted_tickers:
+        return pd.DataFrame()
 
-def fetch_stock_data(tickers, period="6m", start_date=None, end_date=None):
-  """Fetches historical adjusted close prices using individual Ticker history
+    # 2. Fetch the historical data
+    data = yf.download(formatted_tickers, start=start_date, end=end_date, progress=False)
+    
+    if data is None or data.empty:
+        return pd.DataFrame()
 
-  with built-in error handling and fallback controls.
-  """
-  if isinstance(tickers, str):
-    tickers = [t.strip().upper() for t in tickers.split(",")]
-  else:
-    tickers = [t.strip().upper() for t in tickers]
+    # 3. Clean up the multi-index columns returned by newer yfinance versions
+    if isinstance(data.columns, pd.MultiIndex):
+        if 'Adj Close' in data.columns.levels[0]:
+            df = data['Adj Close']
+        elif 'Close' in data.columns.levels[0]:
+            df = data['Close']
+        else:
+            df = data.iloc[:, 0]
+    else:
+        if 'Adj Close' in data.columns:
+            df = data['Adj Close']
+        elif 'Close' in data.columns:
+            df = data['Close']
+        else:
+            df = data
 
-  if not end_date:
-    end_date = (datetime.today() + timedelta(days=1)).strftime("%Y-%m-%d")
+    # 4. If it's a single series (one ticker), convert it back to a DataFrame
+    if isinstance(df, pd.Series):
+        df = df.to_frame(name=formatted_tickers[0])
+    elif isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(-1)
 
-  price_data = {}
+    # 5. STRIP the .NS suffix from the final columns so your strategy.py and backtester.py can read them!
+    df.columns = [str(col).replace(".NS", "").replace(".BO", "") for col in df.columns]
 
-  for ticker in tickers:
-    try:
-      print(f"Fetching data for: {ticker}...")
-      t_obj = yf.Ticker(ticker)
-      if start_date:
-        df = t_obj.history(
-            start=start_date, end=end_date, auto_adjust=True, timeout=10
-        )
-      else:
-        df = t_obj.history(period=period, auto_adjust=True, timeout=10)
-
-      if not df.empty and "Close" in df.columns:
-        price_data[ticker] = df["Close"]
-      else:
-        print(f"Warning: No valid price data found for {ticker}")
-    except Exception as e:
-      print(f"Error fetching {ticker}: {e}")
-
-  if not price_data:
-    return pd.DataFrame()
-
-  combined_df = pd.DataFrame(price_data)
-  combined_df = combined_df.dropna(how="all")
-  return combined_df
+    return df.dropna(how="all")
