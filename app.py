@@ -8,7 +8,10 @@ import requests
 import json
 from bs4 import BeautifulSoup
 import re
-from nsepython import nse_eq
+import asyncio
+import httpx
+import pybreaker
+import logging
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(
@@ -17,7 +20,10 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- 1. SUPABASE CONNECTION SETUP (Bypassing local secrets crash) ---
+# --- CIRCUIT BREAKER CONFIGURATION ---
+exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
+
+# --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
     url = os.environ.get("SUPABASE_URL") or "https://zthirxdbxhdjfpbcpqmk.supabase.co"
@@ -80,7 +86,7 @@ if not st.session_state.user:
             login_email = st.text_input("Email Address")
             login_password = st.text_input("Password", type="password")
             st.markdown("")
-            login_btn = st.form_submit_button("Authenticate Session", use_container_width=True)
+            login_btn = st.form_submit_button("Authenticate Session", width="stretch")
 
             if login_btn:
                 try:
@@ -99,7 +105,7 @@ if not st.session_state.user:
             signup_email = st.text_input("New Email Address")
             signup_password = st.text_input("Choose Secure Password", type="password")
             st.markdown("")
-            signup_btn = st.form_submit_button("Register Account", use_container_width=True)
+            signup_btn = st.form_submit_button("Register Account", width="stretch")
 
             if signup_btn:
                 try:
@@ -111,14 +117,13 @@ if not st.session_state.user:
                 except Exception as e:
                     st.error(f"Registration failed: {e}")
 
-    st.stop()  # Locks the rest of the application until authenticated
+    st.stop()
 
 else:
     # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
+    from strategy import RebalancingStrategy
     from backtester import run_backtest
-    from data_loader import fetch_stock_data
     from risk_manager import check_portfolio_risk
-    from strategy import calculate_portfolio_weights
 
     # Groq and LangChain Imports
     from dotenv import load_dotenv
@@ -256,14 +261,38 @@ else:
         cleaned = user_query.strip()
         return cleaned.upper()
 
+    # --- DECOUPLED API DATA LOADER ---
+    @st.cache_data(ttl=300)
+    def fetch_stock_data(tickers, start_date, end_date):
+        data = {}
+        for ticker in tickers:
+            try:
+                response = requests.get(
+                    f"http://localhost:8000/api/historical/{ticker}",
+                    params={"start": start_date, "end": end_date},
+                    timeout=5
+                )
+                if response.status_code == 200:
+                    records = response.json()
+                    df = pd.DataFrame(records)
+                    if not df.empty and 'Date' in df.columns:
+                        df['Date'] = pd.to_datetime(df['Date'])
+                        df.set_index('Date', inplace=True)
+                        data[ticker] = df.squeeze()
+            except Exception:
+                pass
+                
+        if data:
+            return pd.DataFrame(data).dropna()
+        return pd.DataFrame()
+
     # --- 5. SIDEBAR CONFIGURATION ---
     st.sidebar.markdown("<h3 style='color: #60a5fa; font-size: 16px; margin-bottom: 0px;'>⚡ TERMINAL CONFIG</h3>", unsafe_allow_html=True)
     st.sidebar.markdown("---")
 
-    # Operator Info & Logout Widget
     user_email = st.session_state.user.email
     st.sidebar.markdown(f"**Operator:** `{user_email}`")
-    if st.sidebar.button("Terminate Session", use_container_width=True):
+    if st.sidebar.button("Terminate Session", width="stretch"):
         supabase.auth.sign_out()
         st.session_state.user = None
         st.rerun()
@@ -271,7 +300,7 @@ else:
     st.sidebar.markdown("---")
 
     strategy_method = st.sidebar.selectbox(
-        "Portfolio Optimization", ["Max Sharpe Ratio", "Equal-Weight (1/N)"]
+        "Portfolio Optimization", ["Equal-Weight (1/N)", "Max Sharpe Ratio"]
     )
     time_period = st.sidebar.selectbox(
         "Lookback Window", ["6mo", "1y", "2y", "5y"]
@@ -281,7 +310,7 @@ else:
     )
 
     run_button = st.sidebar.button(
-        "Run Quantitative Model", use_container_width=True
+        "Run Quantitative Model", width="stretch"
     )
 
     # --- 6. MAIN APPLICATION HEADER ---
@@ -355,7 +384,7 @@ else:
                             st.markdown(response_msg)
                             st.session_state.messages.append({"role": "assistant", "content": response_msg})
                     except Exception as e:
-                        err_msg = f"API connection error (Status 400/Request Failed): {e}"
+                        err_msg = f"API connection error: {e}"
                         st.error(err_msg)
                         st.session_state.messages.append({"role": "assistant", "content": err_msg})
 
@@ -372,7 +401,7 @@ else:
                 label_visibility="collapsed",
             )
         with col_s2:
-            search_btn = st.button("Search Web", use_container_width=True)
+            search_btn = st.button("Search Web", width="stretch")
 
         if search_btn:
             if not search_query.strip():
@@ -395,10 +424,10 @@ else:
                     except Exception as e:
                         st.error(f"Search execution error: {e}")
 
-    # --- TAB 3: Live NSE & BSE Market Feed ---
+    # --- TAB 3: Live NSE & BSE Market Feed (Protected by Circuit Breaker) ---
     with tab3:
         st.subheader("🔴 Live Exchange Terminal (NSE & BSE)")
-        st.markdown("Streaming live quotes and market metrics for Indian equities across exchanges.")
+        st.markdown("Streaming live quotes with fault-tolerant circuit breaker protection.")
 
         with st.form("watchlist_form"):
             col_w1, col_w2 = st.columns(2)
@@ -407,80 +436,108 @@ else:
             with col_w2:
                 bse_input = st.text_area("BSE Symbols (comma separated)", value=", ".join(st.session_state.bse_watchlist))
             
-            update_watchlist_btn = st.form_submit_button("Apply Watchlists & Refresh", use_container_width=True)
+            update_watchlist_btn = st.form_submit_button("Apply Watchlists & Refresh", width="stretch")
 
         if update_watchlist_btn:
             st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
             st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
             st.success("Watchlists updated successfully!")
 
-        refresh_rate = st.slider("Refresh Interval (seconds)", min_value=3, max_value=30, value=5, key="live_refresh_slider")
-        auto_refresh = st.checkbox("Enable Live Auto-Refresh", value=True, key="live_auto_checkbox")
+        refresh_rate = st.slider("Refresh Interval (seconds)", min_value=5, max_value=60, value=10, key="live_refresh_slider")
+        auto_refresh = st.checkbox("Enable Live Auto-Refresh", value=False, key="live_auto_checkbox")
 
         col_t1, col_t2 = st.columns(2)
         placeholder_nse = col_t1.empty()
         placeholder_bse = col_t2.empty()
         status_placeholder = st.empty()
 
-        def fetch_nse_live(symbols):
-            rows = []
-            for symbol in symbols:
-                try:
-                    data = nse_eq(symbol)
+        async def fetch_nse_live_async(client, symbol):
+            try:
+                url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                response = await client.get(url, headers=headers, timeout=4.0)
+                if response.status_code == 200:
+                    data = response.json()
                     p_info = data.get("priceInfo", {})
-                    rows.append({
+                    return {
                         "Symbol": symbol,
                         "Exchange": "NSE",
-                        "Last Price (₹)": p_info.get("lastPrice"),
-                        "Change (%)": p_info.get("pChange"),
-                        "Day High (₹)": p_info.get("intraDayHighLow", {}).get("max"),
-                        "Day Low (₹)": p_info.get("intraDayHighLow", {}).get("min"),
-                    })
-                except Exception:
-                    rows.append({"Symbol": symbol, "Exchange": "NSE", "Last Price (₹)": 0.0, "Change (%)": 0.0, "Day High (₹)": 0.0, "Day Low (₹)": 0.0})
-            return pd.DataFrame(rows)
+                        "Last Price (₹)": p_info.get("lastPrice", 0.0),
+                        "Change (%)": p_info.get("pChange", 0.0),
+                        "Day High (₹)": p_info.get("intraDayHighLow", {}).get("max", 0.0),
+                        "Day Low (₹)": p_info.get("intraDayHighLow", {}).get("min", 0.0),
+                    }
+            except Exception:
+                pass
+            return {"Symbol": symbol, "Exchange": "NSE", "Last Price (₹)": "N/A", "Change (%)": "N/A", "Day High (₹)": "N/A", "Day Low (₹)": "N/A"}
 
-        def fetch_bse_live(symbols):
-            rows = []
-            headers = {'user-agent': 'Mozilla/5.0'}
-            for symbol in symbols:
-                try:
-                    search_url = f"https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text={symbol}&flag=site"
-                    resp = requests.get(search_url, headers=headers, timeout=5)
-                    soup = BeautifulSoup(resp.content, "html.parser")
-                    a_tag = soup.find("a")
-                    if a_tag and "href" in a_tag.attrs:
-                        code_match = re.search(r"/(\d+)/", a_tag["href"])
-                        if code_match:
-                            scrip_code = code_match.group(1)
-                            quote_url = f"https://api.bseindia.com/BseIndiaAPI/api/StockReachGraph/w?&scripcode={scrip_code}&flag=0"
-                            q_resp = requests.get(quote_url, headers=headers, timeout=5)
-                            q_data = q_resp.json()
-                            curr_val = q_data.get("CurrVal")
-                            prev_close = q_data.get("PrevClose")
-                            p_change = round(((float(curr_val) - float(prev_close)) / float(prev_close)) * 100, 2) if curr_val and prev_close else 0.0
-                            
-                            rows.append({
-                                "Symbol": symbol,
-                                "Exchange": "BSE",
-                                "Last Price (₹)": float(curr_val) if curr_val else 0.0,
-                                "Change (%)": p_change,
-                                "Scrip Code": scrip_code
-                            })
-                            continue
-                except Exception:
-                    pass
-                rows.append({"Symbol": symbol, "Exchange": "BSE", "Last Price (₹)": 0.0, "Change (%)": 0.0, "Scrip Code": "N/A"})
-            return pd.DataFrame(rows)
+        async def fetch_bse_live_async(client, symbol):
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://www.bseindia.com/'
+            }
+            try:
+                search_url = f"https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text={symbol}&flag=site"
+                resp = await client.get(search_url, headers=headers, timeout=4.0)
+                soup = BeautifulSoup(resp.content, "html.parser")
+                a_tag = soup.find("a")
+                if a_tag and "href" in a_tag.attrs:
+                    code_match = re.search(r"/(\d+)/", a_tag["href"])
+                    if code_match:
+                        scrip_code = code_match.group(1)
+                        quote_url = f"https://api.bseindia.com/BseIndiaAPI/api/StockReachGraph/w?&scripcode={scrip_code}&flag=0"
+                        q_resp = await client.get(quote_url, headers=headers, timeout=4.0)
+                        q_data = q_resp.json()
+                        curr_val = q_data.get("CurrVal")
+                        prev_close = q_data.get("PrevClose")
+                        p_change = round(((float(curr_val) - float(prev_close)) / float(prev_close)) * 100, 2) if curr_val and prev_close else 0.0
+                        
+                        return {
+                            "Symbol": symbol,
+                            "Exchange": "BSE",
+                            "Last Price (₹)": float(curr_val) if curr_val else "N/A",
+                            "Change (%)": p_change,
+                            "Scrip Code": scrip_code
+                        }
+            except Exception:
+                pass
+            return {"Symbol": symbol, "Exchange": "BSE", "Last Price (₹)": "N/A", "Change (%)": "N/A", "Scrip Code": "N/A"}
 
-        df_nse = fetch_nse_live(st.session_state.nse_watchlist)
-        df_bse = fetch_bse_live(st.session_state.bse_watchlist)
+        @exchange_breaker
+        def execute_exchange_fetch(nse_tuple, bse_tuple):
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            async def fetch_all():
+                async with httpx.AsyncClient() as client:
+                    nse_tasks = [fetch_nse_live_async(client, sym) for sym in nse_tuple]
+                    bse_tasks = [fetch_bse_live_async(client, sym) for sym in bse_tuple]
+                    nse_res = await asyncio.gather(*nse_tasks)
+                    bse_res = await asyncio.gather(*bse_tasks)
+                    return pd.DataFrame(nse_res), pd.DataFrame(bse_res)
+
+            return loop.run_until_complete(fetch_all())
+
+        @st.cache_data(ttl=15)
+        def get_cached_live_markets_safe(nse_tuple, bse_tuple):
+            try:
+                return execute_exchange_fetch(nse_tuple, bse_tuple)
+            except pybreaker.CircuitBreakerError:
+                st.warning("⚠️ Exchange API connection unstable (Circuit Breaker Tripped). Serving fallback placeholders.")
+                df_fallback_nse = pd.DataFrame([{"Symbol": s, "Exchange": "NSE", "Last Price (₹)": "Offline", "Change (%)": 0.0, "Day High (₹)": 0.0, "Day Low (₹)": 0.0} for s in nse_tuple])
+                df_fallback_bse = pd.DataFrame([{"Symbol": s, "Exchange": "BSE", "Last Price (₹)": "Offline", "Change (%)": 0.0, "Scrip Code": "N/A"} for s in bse_tuple])
+                return df_fallback_nse, df_fallback_bse
+
+        df_nse, df_bse = get_cached_live_markets_safe(tuple(st.session_state.nse_watchlist), tuple(st.session_state.bse_watchlist))
 
         placeholder_nse.markdown("### **NSE Feed**")
-        placeholder_nse.dataframe(df_nse, use_container_width=True, hide_index=True)
+        placeholder_nse.dataframe(df_nse, width="stretch", hide_index=True)
 
         placeholder_bse.markdown("### **BSE Feed**")
-        placeholder_bse.dataframe(df_bse, use_container_width=True, hide_index=True)
+        placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
 
         if auto_refresh:
             status_placeholder.text(f"Last updated: {time.strftime('%H:%M:%S')} | Refreshing every {refresh_rate}s...")
@@ -492,9 +549,9 @@ else:
         tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
 
         if not tickers:
-            st.error("Please supply valid asset ticker symbols in the Live NSE Feed tab.")
+            st.error("Please supply valid asset ticker symbols in the Live NSE & BSE Feed tab.")
         else:
-            with st.spinner("Executing quantitative pipelines & risk engines..."):
+            with st.spinner("Connecting live exchange watchlist to quantitative engines & backtesters..."):
                 days_map = {"6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
                 start_date = (
                     datetime.today() - timedelta(days=days_map.get(time_period, 365))
@@ -506,52 +563,64 @@ else:
                 )
 
                 if df_prices.empty:
-                    st.error("Failed to fetch market data. Ensure valid ticker symbols (e.g., VMART instead of V-MART).")
+                    st.error("Failed to fetch market data from the backend API. Ensure FastAPI is running on `http://localhost:8000`.")
                 else:
-                    method_key = "max_sharpe" if "Sharpe" in strategy_method else "equal"
-                    raw_weights = calculate_portfolio_weights(tickers, method=method_key)
+                    strategy = RebalancingStrategy(tickers)
+                    target_weights = strategy.calculate_weights()
 
                     safe_weights, risk_status, current_dd = check_portfolio_risk(
-                        df_prices, raw_weights, max_drawdown_limit=max_dd_limit / 100.0
+                        df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0
                     )
 
                     metrics, equity_curve = run_backtest(df_prices, safe_weights)
 
-                    with tab4:
-                        st.subheader("Automated Risk Monitor & Circuit Breakers")
-                        if "CIRCUIT BREAKER" in risk_status:
-                            st.error(risk_status)
-                        elif "WARNING" in risk_status:
-                            st.warning(risk_status)
-                        else:
-                            st.success(f"✅ Status: Normal Operation (Current Drawdown: {current_dd*100:.2f}%)")
+                    st.session_state.quant_results = {
+                        "df_prices": df_prices,
+                        "safe_weights": safe_weights,
+                        "risk_status": risk_status,
+                        "current_dd": current_dd,
+                        "metrics": metrics,
+                        "equity_curve": equity_curve
+                    }
 
-                    with tab5:
-                        st.subheader("Target Portfolio Allocation Matrix")
-                        cols = st.columns(len(safe_weights) if safe_weights else 1)
-                        for i, (ticker, weight) in enumerate(safe_weights.items()):
-                            with cols[i]:
-                                st.metric(label=ticker, value=f"{weight * 100:.2f}%")
+    if "quant_results" in st.session_state:
+        res = st.session_state.quant_results
 
-                        st.markdown("---")
-                        df_w = pd.DataFrame(
-                            list(safe_weights.items()),
-                            columns=["Ticker", "Safe Target Weight"],
-                        )
-                        st.dataframe(df_w, use_container_width=True)
+        with tab4:
+            st.subheader("Automated Risk Monitor & Circuit Breakers")
+            if "CIRCUIT BREAKER" in res["risk_status"]:
+                st.error(res["risk_status"])
+            elif "WARNING" in res["risk_status"]:
+                st.warning(res["risk_status"])
+            else:
+                st.success(f"✅ Status: Normal Operation (Current Drawdown: {res['current_dd']*100:.2f}%)")
 
-                    with tab6:
-                        st.subheader("Historical Performance Analytics")
-                        m_cols = st.columns(4)
-                        m_cols[0].metric("CAGR", f"{metrics.get('CAGR', 0)}%")
-                        m_cols[1].metric("Sharpe Ratio", f"{metrics.get('Sharpe Ratio', 0)}")
-                        m_cols[2].metric("Annualized Vol", f"{metrics.get('Annualized Volatility', 0)}%")
-                        m_cols[3].metric("Max Drawdown", f"{metrics.get('Maximum Drawdown', 0)}%")
+        with tab5:
+            st.subheader("Target Portfolio Allocation Matrix")
+            cols = st.columns(len(res["safe_weights"]) if res["safe_weights"] else 1)
+            for i, (ticker, weight) in enumerate(res["safe_weights"].items()):
+                with cols[i]:
+                    st.metric(label=ticker, value=f"{weight * 100:.2f}%")
 
-                        st.markdown("---")
-                        st.markdown("### Cumulative Portfolio Equity Curve")
-                        st.line_chart(equity_curve, use_container_width=True)
+            st.markdown("---")
+            df_w = pd.DataFrame(
+                list(res["safe_weights"].items()),
+                columns=["Ticker", "Safe Target Weight"],
+            )
+            st.dataframe(df_w, width="stretch", hide_index=True)
 
-                    with tab7:
-                        st.subheader("Normalized Asset Price History")
-                        st.line_chart(df_prices, use_container_width=True)
+        with tab6:
+            st.subheader("Historical Performance Analytics")
+            m_cols = st.columns(4)
+            m_cols[0].metric("CAGR", f"{res['metrics'].get('CAGR', 0)}%")
+            m_cols[1].metric("Sharpe Ratio", f"{res['metrics'].get('Sharpe Ratio', 0)}")
+            m_cols[2].metric("Annualized Vol", f"{res['metrics'].get('Annualized Volatility', 0)}%")
+            m_cols[3].metric("Max Drawdown", f"{res['metrics'].get('Maximum Drawdown', 0)}%")
+
+            st.markdown("---")
+            st.markdown("### Cumulative Portfolio Equity Curve")
+            st.line_chart(res["equity_curve"])
+
+        with tab7:
+            st.subheader("Normalized Asset Price History")
+            st.line_chart(res["df_prices"])
