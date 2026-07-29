@@ -117,14 +117,14 @@ if not st.session_state.user:
                 except Exception as e:
                     st.error(f"Registration failed: {e}")
 
-    st.stop()
+  st.stop()
 
 else:
     # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
     from strategy import RebalancingStrategy
-    from backtester import run_backtest
+   from backtester import run_backtest
     from risk_manager import check_portfolio_risk
-
+   
     # Groq and LangChain Imports
     from dotenv import load_dotenv
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -134,7 +134,7 @@ else:
 
     # Safe import for search engine module
     try:
-        from ddgs import DDGS
+        from duckduckgo_search import DDGS
         search_available = True
     except ImportError:
         search_available = False
@@ -407,7 +407,7 @@ else:
             if not search_query.strip():
                 st.warning("Please enter a valid search string.")
             elif not search_available:
-                st.error("Search package (`ddgs`) is not installed. Run: `pip install ddgs`")
+                st.error("Search package (`duckduckgo-search`) is not installed. Run: `pip install duckduckgo-search`")
             else:
                 with st.spinner("Querying live network feeds..."):
                     try:
@@ -505,12 +505,6 @@ else:
 
         @exchange_breaker
         def execute_exchange_fetch(nse_tuple, bse_tuple):
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
             async def fetch_all():
                 async with httpx.AsyncClient() as client:
                     nse_tasks = [fetch_nse_live_async(client, sym) for sym in nse_tuple]
@@ -519,7 +513,7 @@ else:
                     bse_res = await asyncio.gather(*bse_tasks)
                     return pd.DataFrame(nse_res), pd.DataFrame(bse_res)
 
-            return loop.run_until_complete(fetch_all())
+            return asyncio.run(fetch_all())
 
         @st.cache_data(ttl=15)
         def get_cached_live_markets_safe(nse_tuple, bse_tuple):
@@ -565,7 +559,8 @@ else:
                 if df_prices.empty:
                     st.error("Failed to fetch market data from the backend API. Ensure FastAPI is running on `http://localhost:8000`.")
                 else:
-                    strategy = RebalancingStrategy(tickers)
+                    method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
+                    strategy = RebalancingStrategy(tickers, method=method_mapping)
                     target_weights = strategy.calculate_weights()
 
                     safe_weights, risk_status, current_dd = check_portfolio_risk(
