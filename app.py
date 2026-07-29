@@ -118,7 +118,7 @@ if not st.session_state.user:
                 except Exception as e:
                     st.error(f"Registration failed: {e}")
 
-  st.stop()
+st.stop()
 
 else:
     # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
