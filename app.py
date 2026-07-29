@@ -12,6 +12,7 @@ import asyncio
 import httpx
 import pybreaker
 import logging
+import yfinance as yf
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(
@@ -261,30 +262,31 @@ else:
         cleaned = user_query.strip()
         return cleaned.upper()
 
-    # --- DECOUPLED API DATA LOADER ---
+    # --- DIRECT CLOUD DATA LOADER (YFINANCE) ---
     @st.cache_data(ttl=300)
     def fetch_stock_data(tickers, start_date, end_date):
         data = {}
         for ticker in tickers:
             try:
-                response = requests.get(
-                    f"http://localhost:8000/api/historical/{ticker}",
-                    params={"start": start_date, "end": end_date},
-                    timeout=5
-                )
-                if response.status_code == 200:
-                    records = response.json()
-                    df = pd.DataFrame(records)
-                    if not df.empty and 'Date' in df.columns:
-                        df['Date'] = pd.to_datetime(df['Date'])
-                        df.set_index('Date', inplace=True)
-                        data[ticker] = df.squeeze()
-            except Exception:
+                # Yahoo Finance requires .NS for Indian National Stock Exchange tickers
+                yf_ticker = ticker if ticker.endswith('.NS') or ticker.endswith('.BO') else f"{ticker}.NS"
+                
+                # Fetch data directly from Yahoo Finance
+                stock_data = yf.download(yf_ticker, start=start_date, end=end_date, progress=False)
+                
+                if not stock_data.empty:
+                    # Extract the 'Close' column and store it as a pandas Series
+                    data[ticker] = stock_data["Close"].squeeze()
+            except Exception as e:
                 pass
                 
         if data:
+            # Combine all ticker series into a single DataFrame and drop missing dates
             return pd.DataFrame(data).dropna()
         return pd.DataFrame()
+    
+
+
 
     # --- 5. SIDEBAR CONFIGURATION ---
     st.sidebar.markdown("<h3 style='color: #60a5fa; font-size: 16px; margin-bottom: 0px;'>⚡ TERMINAL CONFIG</h3>", unsafe_allow_html=True)
