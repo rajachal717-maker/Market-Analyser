@@ -72,3 +72,5 @@ def calculate_portfolio_weights(
 
   else:
     raise ValueError(f"Unknown optimization method: {method}")
+class RebalancingStrategy:
+    # Your implementation here
