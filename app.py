@@ -118,14 +118,14 @@ if not st.session_state.user:
                 except Exception as e:
                     st.error(f"Registration failed: {e}")
 
-st.stop()
+    st.stop()
 
 else:
     # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
     from strategy import RebalancingStrategy
-   from backtester import run_backtest
+    from backtester import run_backtest
     from risk_manager import check_portfolio_risk
-   
+
     # Groq and LangChain Imports
     from dotenv import load_dotenv
     from langchain_core.messages import HumanMessage, SystemMessage
