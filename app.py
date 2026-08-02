@@ -13,6 +13,11 @@ import httpx
 import pybreaker
 import logging
 
+# ===== CLOUD API CONFIGURATION =====
+# Replace with your Railway/Render URL after deployment
+CLOUD_API_URL = os.environ.get("API_URL") or "http://127.0.0.1:8000"
+# Example: "https://your-project-xxx.railway.app"
+
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(
     page_title="Institutional Quant Terminal",
@@ -39,7 +44,7 @@ GEMINI_CSS = """
 
 /* Main Body & Backgrounds */
 html, body, [class*="css"], .stApp {
-    font-family: 'Google Sans', 'Inter', sans-serif;
+    font_family: 'Google Sans', 'Inter', sans-serif;
     background-color: #131314;
     color: #e3e3e3;
 }
@@ -274,7 +279,6 @@ def fetch_stock_data(tickers, start_date, end_date):
     for ticker in tickers:
         yf_ticker = ticker if ("." in ticker) else f"{ticker}.NS"
         try:
-            # Bypass the new multi-level column structure
             stock_data = yf.download(
                 yf_ticker, 
                 start=start_date, 
@@ -289,17 +293,11 @@ def fetch_stock_data(tickers, start_date, end_date):
                 st.warning(f"No Close price data found for {yf_ticker}")
                 
         except Exception as e:
-            # Output the exact python error to the UI
             st.error(f"yfinance failed for {yf_ticker}: {str(e)}")
             
     if data:
         return pd.DataFrame(data).dropna()
     return pd.DataFrame()
-
- 
-
-    
-
 
 # --- 5. SIDEBAR CONFIGURATION ---
 st.sidebar.markdown(
@@ -442,7 +440,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Search execution error: {e}")
 
-# --- TAB 3: Live NSE & BSE Market Feed ---
+# --- TAB 3: Live NSE & BSE Market Feed (SIMPLIFIED - REMOVED AUTO-REFRESH) ---
 with tab3:
     st.markdown("<br>", unsafe_allow_html=True)
     with st.form("watchlist_form", border=False):
@@ -460,21 +458,15 @@ with tab3:
 
     st.markdown("<hr style='border-color: #3c4043; margin: 24px 0;'>", unsafe_allow_html=True)
     
-    col_ctrl1, col_ctrl2 = st.columns([1, 2])
-    with col_ctrl1:
-        auto_refresh = st.checkbox("Auto-Refresh Stream", value=False)
-    with col_ctrl2:
-        refresh_rate = st.slider("Interval (s)", min_value=5, max_value=60, value=10, label_visibility="collapsed")
-
+    st.info("💡 Tip: Click the refresh button (↻) at the top right to manually refresh market data.")
+    
     col_t1, col_t2 = st.columns(2)
     placeholder_nse = col_t1.empty()
     placeholder_bse = col_t2.empty()
-    status_placeholder = st.empty()
 
     async def fetch_nse_live_async(client, symbol):
         try:
             url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
-            # Inherits cookies/headers from the parent AsyncClient
             response = await client.get(url, timeout=4.0)
             if response.status_code == 200:
                 data = response.json()
@@ -528,7 +520,6 @@ with tab3:
             }
             
             async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
-                # Bypass NSE WAF by pinging homepage to capture session cookies first
                 try:
                     await client.get("https://www.nseindia.com", timeout=5.0)
                 except Exception:
@@ -559,8 +550,6 @@ with tab3:
     placeholder_bse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
 
-
-
 # --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
 if run_button:
     tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
@@ -579,7 +568,6 @@ if run_button:
                 tickers, start_date=start_date, end_date=end_date
             )
 
-            # --- UPDATED ERROR HANDLING ---
             if df_prices.empty:
                 st.error(f"Data pipeline failed. yfinance returned empty data for tickers: {tickers}. Check your ticker symbols or network connection.")
             else:
@@ -635,4 +623,3 @@ if "quant_results" in st.session_state:
     with tab7:
         st.markdown("<br>", unsafe_allow_html=True)
         st.line_chart(res["df_prices"])
-
