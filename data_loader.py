@@ -1,15 +1,15 @@
-import streamlit as st
 import yfinance as yf
 import pandas as pd
+import streamlit as st
 
-@st.cache_data(ttl=300)  # Cache historical prices for 5 minutes
-def fetch_stock_data(tickers, start_date, end_date):
+# For API server - NO caching, always fresh data
+def fetch_stock_data_live(tickers, start_date, end_date):
+    """Fetch live data without caching - used by FastAPI"""
     data = {}
     for ticker in tickers:
         symbol = f"{ticker}.NS" if not ticker.endswith((".NS", ".BO")) else ticker
         df = yf.download(symbol, start=start_date, end=end_date, progress=False)
         if not df.empty:
-            # Handle multi-index columns if present in newer yfinance versions
             if isinstance(df.columns, pd.MultiIndex):
                 df = df.xs('Close', level=0, axis=1)
             else:
@@ -19,3 +19,10 @@ def fetch_stock_data(tickers, start_date, end_date):
     if data:
         return pd.DataFrame(data).dropna()
     return pd.DataFrame()
+
+
+# For Streamlit app - WITH caching for performance
+@st.cache_data(ttl=300)
+def fetch_stock_data(tickers, start_date, end_date):
+    """Fetch cached data - used by Streamlit UI"""
+    return fetch_stock_data_live(tickers, start_date, end_date)
