@@ -248,6 +248,7 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
+# Updated package import to clear the warning
 try:
     from ddgs import DDGS
     search_available = True
@@ -263,16 +264,18 @@ def resolve_ticker_via_search(user_query: str) -> str:
     cleaned = user_query.strip()
     return cleaned.upper()
 
-@st.cache_data(ttl=300)
+# Temporary Debug Version (No Caching, Shows Exact Errors)
 def fetch_stock_data(tickers, start_date, end_date):
     data = {}
     for ticker in tickers:
+        url = f"http://127.0.0.1:8000/api/historical/{ticker}"
         try:
             response = requests.get(
-                f"http://localhost:8000/api/historical/{ticker}",
+                url,
                 params={"start": start_date, "end": end_date},
                 timeout=5
             )
+            
             if response.status_code == 200:
                 records = response.json()
                 df = pd.DataFrame(records)
@@ -280,12 +283,20 @@ def fetch_stock_data(tickers, start_date, end_date):
                     df['Date'] = pd.to_datetime(df['Date'])
                     df.set_index('Date', inplace=True)
                     data[ticker] = df.squeeze()
-        except Exception:
-            pass
+            else:
+                st.error(f"API Error ({response.status_code}) for {ticker} at {url}: {response.text}")
+                
+        except Exception as e:
+            st.error(f"Connection Failed to {url}: {e}")
             
     if data:
         return pd.DataFrame(data).dropna()
     return pd.DataFrame()
+
+ 
+
+    
+
 
 # --- 5. SIDEBAR CONFIGURATION ---
 st.sidebar.markdown(
@@ -412,7 +423,7 @@ with tab2:
         if not search_query.strip():
             st.warning("Please enter a valid search string.")
         elif not search_available:
-            st.error("Search package (`duckduckgo-search`) is not installed.")
+            st.error("Search package (`ddgs`) is not installed. Run `pip install ddgs`.")
         else:
             with st.spinner("Scanning sources..."):
                 try:
@@ -460,8 +471,8 @@ with tab3:
     async def fetch_nse_live_async(client, symbol):
         try:
             url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-            response = await client.get(url, headers=headers, timeout=4.0)
+            # Inherits cookies/headers from the parent AsyncClient
+            response = await client.get(url, timeout=4.0)
             if response.status_code == 200:
                 data = response.json()
                 p_info = data.get("priceInfo", {})
@@ -476,13 +487,9 @@ with tab3:
         return {"Symbol": symbol, "Exchange": "NSE", "Last (₹)": "N/A", "Change (%)": "N/A"}
 
     async def fetch_bse_live_async(client, symbol):
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://www.bseindia.com/'
-        }
         try:
             search_url = f"https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text={symbol}&flag=site"
-            resp = await client.get(search_url, headers=headers, timeout=4.0)
+            resp = await client.get(search_url, timeout=4.0)
             soup = BeautifulSoup(resp.content, "html.parser")
             a_tag = soup.find("a")
             if a_tag and "href" in a_tag.attrs:
@@ -490,7 +497,7 @@ with tab3:
                 if code_match:
                     scrip_code = code_match.group(1)
                     quote_url = f"https://api.bseindia.com/BseIndiaAPI/api/StockReachGraph/w?&scripcode={scrip_code}&flag=0"
-                    q_resp = await client.get(quote_url, headers=headers, timeout=4.0)
+                    q_resp = await client.get(quote_url, timeout=4.0)
                     q_data = q_resp.json()
                     curr_val = q_data.get("CurrVal")
                     prev_close = q_data.get("PrevClose")
@@ -509,7 +516,21 @@ with tab3:
     @exchange_breaker
     def execute_exchange_fetch(nse_tuple, bse_tuple):
         async def fetch_all():
-            async with httpx.AsyncClient() as client:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': 'https://www.nseindia.com/'
+            }
+            
+            async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
+                # Bypass NSE WAF by pinging homepage to capture session cookies first
+                try:
+                    await client.get("https://www.nseindia.com", timeout=5.0)
+                except Exception:
+                    pass
+                
                 nse_tasks = [fetch_nse_live_async(client, sym) for sym in nse_tuple]
                 bse_tasks = [fetch_bse_live_async(client, sym) for sym in bse_tuple]
                 nse_res = await asyncio.gather(*nse_tasks)
