@@ -559,10 +559,7 @@ with tab3:
     placeholder_bse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
 
-    if auto_refresh:
-        status_placeholder.markdown(f"<span style='color: #c4c7c5; font-size: 12px;'>Syncing at {time.strftime('%H:%M:%S')}</span>", unsafe_allow_html=True)
-        time.sleep(refresh_rate)
-        st.rerun()
+
 
 # --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
 if run_button:
