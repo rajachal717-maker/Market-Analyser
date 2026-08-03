@@ -14,9 +14,7 @@ import pybreaker
 import logging
 
 # ===== CLOUD API CONFIGURATION =====
-# Replace with your Railway/Render URL after deployment
 CLOUD_API_URL = os.environ.get("API_URL") or "http://127.0.0.1:8000"
-# Example: "https://your-project-xxx.railway.app"
 
 # Page Configuration (Must be the first Streamlit command)
 st.set_page_config(
@@ -253,7 +251,6 @@ from langchain_groq import ChatGroq
 
 load_dotenv()
 
-# Updated package import to clear the warning
 try:
     from ddgs import DDGS
     search_available = True
@@ -269,26 +266,66 @@ def resolve_ticker_via_search(user_query: str) -> str:
     cleaned = user_query.strip()
     return cleaned.upper()
 
+# --- UPGRADED HYBRID QUANT PIPELINE ---
+def push_to_timescaledb(df, table_name, db_uri):
+    try:
+        from sqlalchemy import create_engine
+        engine = create_engine(db_uri)
+        df.index.name = 'trade_timestamp' 
+        df.to_sql(table_name, engine, if_exists='append')
+        return True
+    except Exception as e:
+        print(f"Database push failed: {e}")
+        return False
+
 @st.cache_data(ttl=0)
-def fetch_stock_data(tickers, start_date, end_date):
+def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri=None):
     import yfinance as yf
     import pandas as pd
     import streamlit as st
+    import os
     
+    os.makedirs("market_data", exist_ok=True)
     data = {}
+    
     for ticker in tickers:
         yf_ticker = ticker if ("." in ticker) else f"{ticker}.NS"
+        parquet_path = f"market_data/{yf_ticker}_{interval}.parquet"
+        
+        # PATH 1: Attempt local Parquet load
+        if os.path.exists(parquet_path):
+            try:
+                df_ticker = pd.read_parquet(parquet_path, engine='pyarrow')
+                # Filter to requested date bounds
+                df_ticker = df_ticker[(df_ticker.index >= pd.to_datetime(start_date)) & (df_ticker.index <= pd.to_datetime(end_date))]
+                
+                if not df_ticker.empty and 'Close' in df_ticker.columns:
+                    data[ticker] = df_ticker['Close']
+                    continue # Bypass API call entirely!
+            except Exception as e:
+                st.warning(f"Parquet load failed for {ticker}: {e}")
+
+        # PATH 2: Fallback to yfinance API
         try:
             stock_data = yf.download(
                 yf_ticker, 
                 start=start_date, 
                 end=end_date, 
+                interval=interval,
                 progress=False, 
                 multi_level_index=False
             )
             
-            if not stock_data.empty and 'Close' in stock_data.columns:
-                data[ticker] = stock_data['Close']
+            if not stock_data.empty:
+                # Save to Parquet cold storage for future speed
+                stock_data.to_parquet(parquet_path, engine='pyarrow', compression='snappy')
+                
+                # Push to TimescaleDB for live ops (if URI provided)
+                if db_uri:
+                    push_to_timescaledb(stock_data, "intraday_prices" if interval != "1d" else "historical_prices", db_uri)
+                    
+                if 'Close' in stock_data.columns:
+                    data[ticker] = stock_data['Close']
             else:
                 st.warning(f"No Close price data found for {yf_ticker}")
                 
@@ -316,14 +353,28 @@ if st.sidebar.button("Sign Out", width="stretch"):
     st.rerun()
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 16px;'>Data Pipeline Setup</div>", unsafe_allow_html=True)
+
+data_mode = st.sidebar.radio("Data Resolution", ["Daily (End of Day)", "Intraday (5-Minute)"])
+db_connection = st.sidebar.text_input("TimescaleDB URI (Optional)", placeholder="postgresql://user:pass@localhost/quantdb", type="password")
+
+st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 16px;'>Model Parameters</div>", unsafe_allow_html=True)
 
 strategy_method = st.sidebar.selectbox(
     "Optimization Objective", ["Equal-Weight (1/N)", "Max Sharpe Ratio"]
 )
-time_period = st.sidebar.selectbox(
-    "Historical Window", ["6mo", "1y", "2y", "5y"]
-)
+
+# Adapt time options based on resolution choice
+if data_mode == "Intraday (5-Minute)":
+    time_period = st.sidebar.selectbox("Historical Window", ["1 Day", "5 Days", "1 Month", "60 Days"], index=1)
+    days_map = {"1 Day": 1, "5 Days": 5, "1 Month": 30, "60 Days": 60}
+    active_interval = "5m"
+else:
+    time_period = st.sidebar.selectbox("Historical Window", ["6mo", "1y", "2y", "5y"])
+    days_map = {"6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
+    active_interval = "1d"
+
 max_dd_limit = st.sidebar.slider(
     "Risk Tolerance (Max Drawdown %)", -30, -5, -15
 )
@@ -440,7 +491,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Search execution error: {e}")
 
-# --- TAB 3: Live NSE & BSE Market Feed (SIMPLIFIED - REMOVED AUTO-REFRESH) ---
+# --- TAB 3: Live NSE & BSE Market Feed ---
 with tab3:
     st.markdown("<br>", unsafe_allow_html=True)
     with st.form("watchlist_form", border=False):
@@ -557,19 +608,23 @@ if run_button:
     if not tickers:
         st.error("Please supply valid asset ticker symbols.")
     else:
-        with st.spinner("Compiling quantitative models..."):
-            days_map = {"6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
-            start_date = (
-                datetime.today() - timedelta(days=days_map.get(time_period, 365))
-            ).strftime("%Y-%m-%d")
+        with st.spinner("Compiling quantitative models via Hybrid Pipeline..."):
+            
+            lookback = days_map.get(time_period, 365)
+            start_date = (datetime.today() - timedelta(days=lookback)).strftime("%Y-%m-%d")
             end_date = datetime.today().strftime("%Y-%m-%d")
 
-            df_prices = fetch_stock_data(
-                tickers, start_date=start_date, end_date=end_date
+            # Execute Hybrid Data Fetch (Parquet -> yfinance -> Timescale)
+            df_prices = fetch_stock_data_hybrid(
+                tickers, 
+                start_date=start_date, 
+                end_date=end_date, 
+                interval=active_interval,
+                db_uri=db_connection if db_connection else None
             )
 
             if df_prices.empty:
-                st.error(f"Data pipeline failed. yfinance returned empty data for tickers: {tickers}. Check your ticker symbols or network connection.")
+                st.error(f"Data pipeline failed. Could not retrieve historical data for: {tickers}")
             else:
                 method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
                 strategy = RebalancingStrategy(tickers, method=method_mapping)
