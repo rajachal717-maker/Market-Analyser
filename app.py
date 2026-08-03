@@ -644,13 +644,27 @@ with tab3:
             df_fallback_bse = pd.DataFrame([{"Symbol": s, "Exchange": "BSE", "Last (₹)": "Offline", "Change (%)": 0.0} for s in bse_tuple])
             return df_fallback_nse, df_fallback_bse
 
-    df_nse, df_bse = get_cached_live_markets_safe(tuple(st.session_state.nse_watchlist), tuple(st.session_state.bse_watchlist))
+    # Fetch live market data
+    df_nse, df_bse = get_cached_live_markets_safe(
+        tuple(st.session_state.nse_watchlist), 
+        tuple(st.session_state.bse_watchlist)
+    )
 
+    # --- FIX: Convert mixed-type columns to string to prevent PyArrow serialization errors ---
+    if not df_nse.empty:
+        df_nse["Last (₹)"] = df_nse["Last (₹)"].astype(str)
+        df_nse["Change (%)"] = df_nse["Change (%)"].astype(str)
+    if not df_bse.empty:
+        df_bse["Last (₹)"] = df_bse["Last (₹)"].astype(str)
+        df_bse["Change (%)"] = df_bse["Change (%)"].astype(str)
+
+    # Display DataFrames
     placeholder_nse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>NSE Equities</h4>", unsafe_allow_html=True)
     placeholder_nse.dataframe(df_nse, width="stretch", hide_index=True)
 
     placeholder_bse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
+    
 
 
 # --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
