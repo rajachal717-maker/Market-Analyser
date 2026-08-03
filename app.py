@@ -501,6 +501,69 @@ with tab2:
 # --- TAB 3: Live NSE & BSE Market Feed ---
 with tab3:
     st.markdown("<br>", unsafe_allow_html=True)
+
+    # Robust yfinance fetching helper
+    def get_yf_quote(symbol, exchange):
+        import yfinance as yf
+        suffix = ".NS" if exchange == "NSE" else ".BO"
+        try:
+            ticker = yf.Ticker(f"{symbol}{suffix}")
+            curr = ticker.fast_info.get('lastPrice')
+            prev = ticker.fast_info.get('previousClose')
+            
+            if curr and prev:
+                change = round(((curr - prev) / prev) * 100, 2)
+                return {
+                    "Symbol": symbol, 
+                    "Exchange": exchange, 
+                    "Last (₹)": round(curr, 2), 
+                    "Change (%)": change
+                }
+        except Exception:
+            pass
+        return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
+
+    # === NEW: LIVE STOCK SEARCH BAR ===
+    st.markdown("<h4 style='color:#e3e3e3; font-size: 16px; margin-bottom: 8px;'>🔍 Live Quote Lookup</h4>", unsafe_allow_html=True)
+    col_s1, col_s2, col_s3 = st.columns([3, 1, 1])
+    with col_s1:
+        search_sym = st.text_input(
+            "Ticker Symbol",
+            placeholder="Search any stock (e.g., ZOMATO, TATASTEEL, HDFCBANK)...",
+            label_visibility="collapsed"
+        )
+    with col_s2:
+        search_exch = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
+    with col_s3:
+        search_quote_btn = st.button("Get Quote", width="stretch")
+
+    if search_quote_btn and search_sym.strip():
+        symbol_clean = search_sym.strip().upper()
+        with st.spinner(f"Fetching live quote for {symbol_clean}..."):
+            quote_res = get_yf_quote(symbol_clean, search_exch)
+            
+            if quote_res["Last (₹)"] == "N/A":
+                st.error(f"Could not retrieve live quote for **{symbol_clean}** on **{search_exch}**. Verify the ticker symbol.")
+            else:
+                q_cols = st.columns(3)
+                q_cols[0].metric(
+                    label=f"{symbol_clean} ({search_exch})",
+                    value=f"₹{quote_res['Last (₹)']}",
+                    delta=f"{quote_res['Change (%)']}%"
+                )
+                q_cols[1].metric(
+                    label="Exchange Status",
+                    value="ACTIVE" if quote_res["Change (%)"] != "N/A" else "OFFLINE"
+                )
+                q_cols[2].metric(
+                    label="Quick Action",
+                    value="Add Below 👇",
+                    delta_color="off"
+                )
+
+    st.markdown("<hr style='border-color: #3c4043; margin: 24px 0;'>", unsafe_allow_html=True)
+
+    # === EXISTING WATCHLIST CONFIGURATION ===
     with st.form("watchlist_form", border=False):
         col_w1, col_w2 = st.columns(2)
         with col_w1:
@@ -514,28 +577,11 @@ with tab3:
         st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
         st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
 
-    st.markdown("<hr style='border-color: #3c4043; margin: 24px 0;'>", unsafe_allow_html=True)
     st.info("💡 Tip: Click the refresh button (↻) at the top right to manually refresh market data.")
     
     col_t1, col_t2 = st.columns(2)
     placeholder_nse = col_t1.empty()
     placeholder_bse = col_t2.empty()
-
-    # FIX: Replaced brittle web scraping with robust yfinance fetching
-    def get_yf_quote(symbol, exchange):
-        import yfinance as yf
-        suffix = ".NS" if exchange == "NSE" else ".BO"
-        try:
-            ticker = yf.Ticker(f"{symbol}{suffix}")
-            curr = ticker.fast_info.get('lastPrice')
-            prev = ticker.fast_info.get('previousClose')
-            
-            if curr and prev:
-                change = round(((curr - prev) / prev) * 100, 2)
-                return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": change}
-        except Exception:
-            pass
-        return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
     async def fetch_live_async(symbol, exchange):
         return await asyncio.to_thread(get_yf_quote, symbol, exchange)
