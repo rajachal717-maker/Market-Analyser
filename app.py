@@ -501,69 +501,86 @@ with tab2:
 # --- TAB 3: Live NSE & BSE Market Feed ---
 with tab3:
     st.markdown("<br>", unsafe_allow_html=True)
-
-    # Robust yfinance fetching helper
+    
+    # 1. Helper function with Intelligent Ticker Resolution
     def get_yf_quote(symbol, exchange):
         import yfinance as yf
-        suffix = ".NS" if exchange == "NSE" else ".BO"
+        import requests
+        
+        symbol = symbol.strip().upper()
+        yf_ticker = None
+        
+        if exchange == "NSE":
+            yf_ticker = f"{symbol}.NS"
+        else:
+            # BSE Name-to-Code Auto-Resolver via Yahoo Search API
+            try:
+                url = f"https://query2.finance.yahoo.com/v1/finance/search?q={symbol}"
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                res = requests.get(url, headers=headers, timeout=3)
+                if res.status_code == 200:
+                    quotes = res.json().get('quotes', [])
+                    for q in quotes:
+                        # Grab the first result that is listed on the BSE (.BO)
+                        if q.get('symbol', '').endswith('.BO'):
+                            yf_ticker = q.get('symbol')
+                            break
+            except Exception as e:
+                pass
+            
+            # Fallback if search fails
+            if not yf_ticker:
+                yf_ticker = f"{symbol}.BO"
+
+        # Fetch the actual live quote
         try:
-            ticker = yf.Ticker(f"{symbol}{suffix}")
+            ticker = yf.Ticker(yf_ticker)
             curr = ticker.fast_info.get('lastPrice')
             prev = ticker.fast_info.get('previousClose')
             
             if curr and prev:
                 change = round(((curr - prev) / prev) * 100, 2)
-                return {
-                    "Symbol": symbol, 
-                    "Exchange": exchange, 
-                    "Last (₹)": round(curr, 2), 
-                    "Change (%)": change
-                }
+                
+                # Show the resolved numeric code if it's BSE, otherwise standard name
+                display_sym = yf_ticker.replace('.NS', '').replace('.BO', '')
+                if exchange == "BSE" and display_sym != symbol:
+                    display_sym = f"{symbol} ({display_sym})"
+                    
+                return {"Symbol": display_sym, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": change}
         except Exception:
             pass
+            
         return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
-    # === NEW: LIVE STOCK SEARCH BAR ===
-    st.markdown("<h4 style='color:#e3e3e3; font-size: 16px; margin-bottom: 8px;'>🔍 Live Quote Lookup</h4>", unsafe_allow_html=True)
-    col_s1, col_s2, col_s3 = st.columns([3, 1, 1])
-    with col_s1:
-        search_sym = st.text_input(
-            "Ticker Symbol",
-            placeholder="Search any stock (e.g., ZOMATO, TATASTEEL, HDFCBANK)...",
-            label_visibility="collapsed"
-        )
-    with col_s2:
-        search_exch = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
-    with col_s3:
+    # 2. --- 🔍 QUICK SEARCH BAR ---
+    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 8px;'>🔍 Quick Quote Search</div>", unsafe_allow_html=True)
+    
+    col_sq1, col_sq2, col_sq3 = st.columns([3, 1, 1])
+    with col_sq1:
+        search_ticker = st.text_input("Search Ticker", placeholder="e.g. ZOMATO, ITC, HDFCBANK", label_visibility="collapsed")
+    with col_sq2:
+        search_exchange = st.selectbox("Search Exchange", ["NSE", "BSE"], label_visibility="collapsed")
+    with col_sq3:
         search_quote_btn = st.button("Get Quote", width="stretch")
 
-    if search_quote_btn and search_sym.strip():
-        symbol_clean = search_sym.strip().upper()
-        with st.spinner(f"Fetching live quote for {symbol_clean}..."):
-            quote_res = get_yf_quote(symbol_clean, search_exch)
-            
-            if quote_res["Last (₹)"] == "N/A":
-                st.error(f"Could not retrieve live quote for **{symbol_clean}** on **{search_exch}**. Verify the ticker symbol.")
-            else:
-                q_cols = st.columns(3)
-                q_cols[0].metric(
-                    label=f"{symbol_clean} ({search_exch})",
-                    value=f"₹{quote_res['Last (₹)']}",
-                    delta=f"{quote_res['Change (%)']}%"
-                )
-                q_cols[1].metric(
-                    label="Exchange Status",
-                    value="ACTIVE" if quote_res["Change (%)"] != "N/A" else "OFFLINE"
-                )
-                q_cols[2].metric(
-                    label="Quick Action",
-                    value="Add Below 👇",
-                    delta_color="off"
-                )
+    if search_quote_btn:
+        if search_ticker.strip():
+            with st.spinner(f"Resolving and fetching quote for {search_ticker.strip().upper()}..."):
+                quote = get_yf_quote(search_ticker, search_exchange)
+                if quote["Last (₹)"] != "N/A":
+                    col_r1, col_r2, col_r3 = st.columns(3)
+                    col_r1.metric("Asset", f"{quote['Symbol']}")
+                    col_r2.metric("Last Price", f"₹{quote['Last (₹)']}")
+                    col_r3.metric("Daily Change", f"{quote['Change (%)']}%")
+                else:
+                    st.error(f"Could not retrieve live quote for '{search_ticker.upper()}' on {search_exchange}. Verify the company name.")
+        else:
+            st.warning("Please enter a company name or ticker.")
 
     st.markdown("<hr style='border-color: #3c4043; margin: 24px 0;'>", unsafe_allow_html=True)
 
-    # === EXISTING WATCHLIST CONFIGURATION ===
+    # 3. --- MANAGED WATCHLISTS ---
+    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 8px;'>📋 Managed Watchlists</div>", unsafe_allow_html=True)
     with st.form("watchlist_form", border=False):
         col_w1, col_w2 = st.columns(2)
         with col_w1:
@@ -577,7 +594,7 @@ with tab3:
         st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
         st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
 
-    st.info("💡 Tip: Click the refresh button (↻) at the top right to manually refresh market data.")
+    st.info("💡 Tip: You can now type company names (e.g. ZOMATO) into the BSE watchlist. The system will auto-resolve them!")
     
     col_t1, col_t2 = st.columns(2)
     placeholder_nse = col_t1.empty()
@@ -612,6 +629,7 @@ with tab3:
 
     placeholder_bse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
+
 
 # --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
 if run_button:
