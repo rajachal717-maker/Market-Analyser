@@ -2,48 +2,68 @@ import numpy as np
 import pandas as pd
 
 
-def check_portfolio_risk(
-    df_prices, weights_dict, max_drawdown_limit=-0.15, vol_target=0.20
-):
-  """Evaluates portfolio drawdown and applies risk circuit breakers.
+def check_portfolio_risk(df_prices: pd.DataFrame, target_weights: dict, max_drawdown_limit: float = -0.15):
+    """
+    Institutional Risk Diagnostic & Dynamic Portfolio De-risking Engine.
+    
+    Returns:
+        (safe_weights, risk_status_string, current_drawdown_float)
+    """
+    if df_prices.empty or not target_weights:
+        return target_weights, "Status: Nominal (No Data)", 0.0
 
-  Returns safe adjusted weights and warning flags.
-  """
-  if df_prices.empty or not weights_dict:
-    return weights_dict, "Normal", 0.0
+    # Ensure tickers match price DataFrame columns
+    valid_tickers = [t for t in target_weights.keys() if t in df_prices.columns]
+    if not valid_tickers:
+        return target_weights, "Status: Nominal", 0.0
 
-  returns = df_prices[list(weights_dict.keys())].pct_change().dropna()
-  weight_array = np.array(list(weights_dict.values()))
+    # Extract weights vector
+    weights = np.array([target_weights[t] for t in valid_tickers])
+    weights = weights / np.sum(weights)  # Renormalize
 
-  # Calculate portfolio historical daily returns
-  portfolio_returns = returns.dot(weight_array)
+    # Compute Portfolio Historical Returns
+    returns = df_prices[valid_tickers].pct_change().dropna()
+    portfolio_daily_returns = (returns * weights).sum(axis=1)
 
-  # Calculate Cumulative Returns & Drawdown
-  cum_returns = (1 + portfolio_returns).cumprod()
-  rolling_max = cum_returns.cummax()
-  drawdown = (cum_returns - rolling_max) / rolling_max
-  current_drawdown = drawdown.iloc[-1]
+    # 1. Compute Peak-to-Trough Drawdown
+    cumulative_returns = (1 + portfolio_daily_returns).cumprod()
+    running_max = cumulative_returns.cummax()
+    drawdown_series = (cumulative_returns - running_max) / running_max
+    current_drawdown = float(drawdown_series.iloc[-1]) if not drawdown_series.empty else 0.0
 
-  # Calculate Annualized Volatility
-  annual_vol = portfolio_returns.std() * np.sqrt(252)
+    # 2. Risk Metrics: Value-at-Risk (95% VaR) & Conditional VaR (99% Expected Shortfall)
+    var_95 = np.percentile(portfolio_daily_returns, 5)
+    cvar_95 = portfolio_daily_returns[portfolio_daily_returns <= var_95].mean() if len(portfolio_daily_returns) > 0 else 0.0
 
-  status = "Normal"
-  adjusted_weights = weights_dict.copy()
+    # 3. Concentration Index (Herfindahl-Hirschman Index - HHI)
+    hhi = np.sum(weights ** 2)
 
-  # Circuit Breaker Trigger
-  if current_drawdown <= max_drawdown_limit:
-    status = (
-        "🔴 CIRCUIT BREAKER TRIGGERED: Max Drawdown Limit Exceeded!"
-        f" ({current_drawdown*100:.2f}%)"
-    )
-    # Reallocate to defensive stance (e.g., zero out or flatten risk)
-    adjusted_weights = {k: 0.0 for k in weights_dict.keys()}
-  elif annual_vol > vol_target:
-    status = (
-        "🟡 WARNING: High Portfolio Volatility Detected"
-        f" ({annual_vol*100:.2f}%). Scaling risk."
-    )
-    scale_factor = vol_target / annual_vol
-    adjusted_weights = {k: round(v * scale_factor, 4) for k, v in weights_dict.items()}
+    # 4. Dynamic De-Risking & Circuit Breaker Logic
+    safe_weights = target_weights.copy()
+    
+    # Standardize threshold sign (make negative for comparison)
+    limit = -abs(max_drawdown_limit)
 
-  return adjusted_weights, status, float(current_drawdown)
+    if current_drawdown < limit:
+        # CRITICAL CIRCUIT BREAKER: Scale down exposure to prevent further capital destruction
+        de_risk_factor = max(0.2, 1.0 - (abs(current_drawdown) - abs(limit)) / abs(limit))
+        safe_weights = {t: round(w * de_risk_factor, 4) for t, w in target_weights.items()}
+        
+        status = (
+            f"🚨 CIRCUIT BREAKER ACTIVATED: Max Drawdown breached ({current_drawdown*100:.2f}% < {limit*100:.2f}%). "
+            f"Exposure de-risked by {(1-de_risk_factor)*100:.1f}%. | VaR(95): {var_95*100:.2f}%"
+        )
+    elif current_drawdown < (limit * 0.5):
+        # WARNING ZONE
+        status = (
+            f"⚠️ WARNING: Portfolio approaching drawdown threshold ({current_drawdown*100:.2f}%). "
+            f"VaR(95): {var_95*100:.2f}% | CVaR(95): {cvar_95*100:.2f}% | HHI: {hhi:.2f}"
+        )
+    else:
+        # NOMINAL HEALTH
+        status = (
+            f"Status: Nominal | Drawdown: {current_drawdown*100:.2f}% | "
+            f"Daily VaR(95): {var_95*100:.2f}% | Portfolio Concentration HHI: {hhi:.2f}"
+        )
+
+    return safe_weights, status, current_drawdown
