@@ -1,7 +1,15 @@
 [theme]
-base = "dark"
-primaryColor = "#2563eb"
-backgroundColor = "#0b0f19"
-secondaryBackgroundColor = "#111827"
-textColor = "#f0f6fc"
+# The primary accent color for interactive elements
+primaryColor = "#2962FF" 
+
+# Pure black background for the OLED fintech aesthetic
+backgroundColor = "#000000" 
+
+# Slightly lighter charcoal for sidebar and contrasting elements
+secondaryBackgroundColor = "#121212" 
+
+# Crisp white/light-grey text for maximum readability
+textColor = "#E3E3E3" 
+
+# Clean, modern font
 font = "sans serif"

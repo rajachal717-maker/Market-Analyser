@@ -35,83 +35,82 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# --- GEMINI-STYLE GLOBAL CSS CONFIGURATION ---
-GEMINI_CSS = """
+# --- FINTECH OLED GLOBAL CSS CONFIGURATION ---
+THEME_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Main Body & Backgrounds */
+/* Main Body & Backgrounds (OLED Black) */
 html, body, [class*="css"], .stApp {
-    font_family: 'Google Sans', 'Inter', sans-serif;
-    background-color: #131314;
-    color: #e3e3e3;
+    font-family: 'Inter', sans-serif;
+    background-color: #000000 !important;
+    color: #E3E3E3;
 }
+
+/* Hide Streamlit Header */
+header { background-color: transparent !important; }
 
 /* Sidebar styling */
 [data-testid="stSidebar"] {
-    background-color: #1e1f20 !important;
-    border-right: 1px solid #3c4043;
+    background-color: #0A0A0A !important;
+    border-right: 1px solid #1A1A1A;
 }
 [data-testid="stSidebar"] label {
-    color: #c4c7c5 !important;
+    color: #9AA0A6 !important;
     font-weight: 500;
     font-size: 13px;
-    margin-bottom: 4px;
 }
 
-/* Inputs & Form Fields (Pill-shaped, modern) */
+/* Inputs & Form Fields */
 .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
-    background-color: #1e1f20 !important;
-    color: #e3e3e3 !important;
-    border: 1px solid #3c4043 !important;
-    border-radius: 24px !important;
+    background-color: #121212 !important;
+    color: #FFFFFF !important;
+    border: 1px solid #2B2B2B !important;
+    border-radius: 8px !important;
     padding: 10px 16px !important;
-    transition: border-color 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus {
-    border-color: #8ab4f8 !important;
-    box-shadow: 0 0 0 1px #8ab4f8 !important;
+    border-color: #2962FF !important;
+    box-shadow: 0 0 0 1px #2962FF !important;
 }
 
-/* Buttons (Gemini subtle style) */
+/* Buttons */
 .stButton>button {
-    background-color: transparent;
-    color: #8ab4f8;
-    border: 1px solid #3c4043;
-    border-radius: 24px;
-    font-weight: 500;
+    background-color: #2962FF;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
     padding: 0.5rem 1.2rem;
     transition: all 0.2s ease;
 }
 .stButton>button:hover {
-    background-color: rgba(138, 180, 248, 0.08);
-    border-color: #8ab4f8;
-    color: #8ab4f8;
+    background-color: #1C44B2;
+    color: #FFFFFF;
+    transform: translateY(-1px);
 }
 
-/* Primary Action Button Override */
-[data-testid="stSidebar"] .stButton>button {
-    background-color: #c2e7ff;
-    color: #001d35;
-    border: none;
-    font-weight: 600;
+/* Form Submit overrides */
+[data-testid="stForm"] .stButton>button {
+    background-color: transparent;
+    border: 1px solid #2962FF;
+    color: #2962FF;
 }
-[data-testid="stSidebar"] .stButton>button:hover {
-    background-color: #b0dfff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+[data-testid="stForm"] .stButton>button:hover {
+    background-color: rgba(41, 98, 255, 0.1);
 }
 
 /* Modern Minimalist Tabs */
 .stTabs [data-baseweb="tab-list"] {
     background-color: transparent;
     gap: 24px;
-    border-bottom: 1px solid #3c4043;
-    padding: 0;
+    border-bottom: 1px solid #1A1A1A;
 }
 .stTabs [data-baseweb="tab"] {
     background-color: transparent;
     border: none;
-    color: #c4c7c5;
+    color: #9AA0A6;
     border-radius: 0;
     border-bottom: 3px solid transparent;
     padding: 12px 4px;
@@ -119,59 +118,81 @@ html, body, [class*="css"], .stApp {
     font-size: 14px;
 }
 .stTabs [aria-selected="true"] {
-    color: #8ab4f8 !important;
+    color: #2962FF !important;
     background-color: transparent !important;
-    border-bottom: 3px solid #8ab4f8;
-    box-shadow: none !important;
+    border-bottom: 3px solid #2962FF;
 }
 
-/* Metric Cards */
-[data-testid="stMetric"] {
-    background-color: #1e1f20;
-    border: 1px solid #3c4043;
-    padding: 20px;
-    border-radius: 12px;
-    box-shadow: none;
+/* Style the Metric Cards (Glass/Dark Panel Effect) */
+div[data-testid="metric-container"] {
+    background-color: #121212; 
+    border: 1px solid #2B2B2B; 
+    padding: 15px 20px;
+    border-radius: 12px;       
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    transition: transform 0.2s ease-in-out, border 0.2s ease-in-out;
 }
+
+/* Slight hover effect for interactivity */
+div[data-testid="metric-container"]:hover {
+    transform: translateY(-2px);
+    border: 1px solid #2962FF; 
+}
+
 [data-testid="stMetricLabel"] {
-    color: #c4c7c5 !important;
-    font-size: 11px !important;
-    font-weight: 600 !important;
+    color: #9AA0A6 !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 [data-testid="stMetricValue"] {
-    color: #e3e3e3 !important;
-    font-size: 28px !important;
-    font-weight: 400 !important;
+    color: #FFFFFF !important;
+    font-size: 26px !important;
+    font-weight: 600 !important;
+}
+
+/* Vibrant Colors for Profit and Loss */
+div[data-testid="stMetricDelta"] svg[title="Up"] {
+    color: #00E676 !important; 
+}
+div[data-testid="stMetricDelta"] > div:has(svg[title="Up"]) {
+    color: #00E676 !important;
+    font-weight: 600;
+}
+div[data-testid="stMetricDelta"] svg[title="Down"] {
+    color: #FF1744 !important; 
+}
+div[data-testid="stMetricDelta"] > div:has(svg[title="Down"]) {
+    color: #FF1744 !important;
+    font-weight: 600;
 }
 
 /* Chat Interface */
 [data-testid="stChatMessage"] {
     background-color: transparent !important;
-    padding: 1rem 0 !important;
 }
 [data-testid="stChatInput"] {
-    background-color: #1e1f20 !important;
-    border: 1px solid #3c4043 !important;
-    border-radius: 24px !important;
+    background-color: #121212 !important;
+    border: 1px solid #2B2B2B !important;
+    border-radius: 8px !important;
 }
 [data-testid="stChatInput"] textarea {
-    color: #e3e3e3 !important;
+    color: #FFFFFF !important;
 }
 
 /* Dataframes */
 [data-testid="stDataFrame"] {
-    border: 1px solid #3c4043;
+    border: 1px solid #1A1A1A;
     border-radius: 12px;
     overflow: hidden;
 }
 
 /* Typography Overrides */
-h1, h2, h3 {
-    color: #e3e3e3 !important;
-    font-weight: 400;
-    letter-spacing: -0.01em;
+h1, h2, h3, h4, h5 {
+    color: #FFFFFF !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.5px;
 }
 </style>
 """
@@ -181,7 +202,7 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 if not st.session_state.user:
-    st.markdown(GEMINI_CSS, unsafe_allow_html=True)
+    st.markdown(THEME_CSS, unsafe_allow_html=True)
     st.markdown(
         """
         <style>
@@ -191,7 +212,7 @@ if not st.session_state.user:
     )
 
     st.markdown("<h2 style='text-align: center; margin-bottom: 8px;'>✨ Welcome to Terminal</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #c4c7c5; font-size: 14px; margin-bottom: 32px;'>Sign in to access your quantitative workflows.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #9AA0A6; font-size: 14px; margin-bottom: 32px;'>Sign in to access your quantitative workflows.</p>", unsafe_allow_html=True)
 
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Create Account"])
 
@@ -238,7 +259,7 @@ if not st.session_state.user:
 # =====================================================================
 
 # Inject Global CSS
-st.markdown(GEMINI_CSS, unsafe_allow_html=True)
+st.markdown(THEME_CSS, unsafe_allow_html=True)
 
 # --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
 from strategy import RebalancingStrategy
@@ -347,9 +368,9 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
 # --- 5. SIDEBAR CONFIGURATION ---
 st.sidebar.markdown(
     f"""
-    <div style="background-color: #131314; padding: 16px; border-radius: 12px; border: 1px solid #3c4043; margin-bottom: 24px;">
-        <div style="font-size: 11px; color: #c4c7c5; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Session</div>
-        <div style="font-size: 13px; color: #e3e3e3; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{st.session_state.user.email}</div>
+    <div style="background-color: #121212; padding: 16px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
+        <div style="font-size: 11px; color: #9AA0A6; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Session</div>
+        <div style="font-size: 13px; color: #FFFFFF; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{st.session_state.user.email}</div>
     </div>
     """,
     unsafe_allow_html=True
@@ -361,13 +382,13 @@ if st.sidebar.button("Sign Out", width="stretch"):
     st.rerun()
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
-st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 16px;'>Data Pipeline Setup</div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 16px;'>Data Pipeline Setup</div>", unsafe_allow_html=True)
 
 data_mode = st.sidebar.radio("Data Resolution", ["Daily (End of Day)", "Intraday (5-Minute)"])
 db_connection = st.sidebar.text_input("TimescaleDB URI (Optional)", placeholder="postgresql://user:pass@localhost/quantdb", type="password")
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
-st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 16px;'>Model Parameters</div>", unsafe_allow_html=True)
+st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 16px;'>Model Parameters</div>", unsafe_allow_html=True)
 
 strategy_method = st.sidebar.selectbox(
     "Optimization Objective", ["Equal-Weight (1/N)", "Max Sharpe Ratio"]
@@ -393,12 +414,12 @@ run_button = st.sidebar.button("Execute Pipeline", width="stretch")
 col_h1, col_h2 = st.columns([4, 1])
 with col_h1:
     st.markdown("<h2 style='margin-bottom: 4px;'>Institutional Intelligence Terminal</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #c4c7c5; font-size: 14px;'>Advanced Quantitative Strategy Execution & AI Analysis</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Advanced Quantitative Strategy Execution & AI Analysis</p>", unsafe_allow_html=True)
 with col_h2:
     st.markdown(
         """
         <div style='text-align: right; padding-top: 16px;'>
-            <span style='background-color: rgba(129, 201, 149, 0.1); color: #81c995; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(129, 201, 149, 0.2);'>
+            <span style='background-color: rgba(0, 230, 118, 0.1); color: #00E676; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(0, 230, 118, 0.2);'>
                 ● ONLINE
             </span>
         </div>
@@ -575,7 +596,7 @@ with tab3:
         return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
     
     # 2. --- 🔍 QUICK SEARCH BAR ---
-    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 8px;'>🔍 Quick Quote Search</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>🔍 Quick Quote Search</div>", unsafe_allow_html=True)
     
     col_sq1, col_sq2, col_sq3 = st.columns([3, 1, 1])
     with col_sq1:
@@ -599,10 +620,10 @@ with tab3:
         else:
             st.warning("Please enter a company name or ticker.")
 
-    st.markdown("<hr style='border-color: #3c4043; margin: 24px 0;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
 
     # 3. --- MANAGED WATCHLISTS ---
-    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 8px;'>📋 Managed Watchlists</div>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>📋 Managed Watchlists</div>", unsafe_allow_html=True)
     with st.form("watchlist_form", border=False):
         col_w1, col_w2 = st.columns(2)
         with col_w1:
@@ -659,13 +680,12 @@ with tab3:
         df_bse["Change (%)"] = df_bse["Change (%)"].astype(str)
 
     # Display DataFrames
-    placeholder_nse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>NSE Equities</h4>", unsafe_allow_html=True)
+    placeholder_nse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>NSE Equities</h4>", unsafe_allow_html=True)
     placeholder_nse.dataframe(df_nse, width="stretch", hide_index=True)
 
-    placeholder_bse.markdown("<h4 style='color:#e3e3e3; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
+    placeholder_bse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
     
-
 
 # --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
 if run_button:
@@ -693,9 +713,10 @@ if run_button:
             else:
                 method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
                 
-                # FIX: Only pass tickers that successfully fetched data to prevent crash
                 valid_tickers = df_prices.columns.tolist()
-                strategy = RebalancingStrategy(valid_tickers, method=method_mapping)
+                
+                # Instantiating the upgraded RebalancingStrategy
+                strategy = RebalancingStrategy(valid_tickers, df_prices=df_prices, method=method_mapping)
                 target_weights = strategy.calculate_weights()
 
                 safe_weights, risk_status, current_dd = check_portfolio_risk(
@@ -746,5 +767,3 @@ if "quant_results" in st.session_state:
     with tab7:
         st.markdown("<br>", unsafe_allow_html=True)
         st.line_chart(res["df_prices"])
-
-
