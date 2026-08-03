@@ -296,12 +296,16 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
         if os.path.exists(parquet_path):
             try:
                 df_ticker = pd.read_parquet(parquet_path, engine='pyarrow')
-                # Filter to requested date bounds
+                
+                # FIX: Strip timezone from the index to allow safe date comparisons
+                if df_ticker.index.tz is not None:
+                    df_ticker.index = df_ticker.index.tz_localize(None)
+                    
                 df_ticker = df_ticker[(df_ticker.index >= pd.to_datetime(start_date)) & (df_ticker.index <= pd.to_datetime(end_date))]
                 
                 if not df_ticker.empty and 'Close' in df_ticker.columns:
                     data[ticker] = df_ticker['Close']
-                    continue # Bypass API call entirely!
+                    continue
             except Exception as e:
                 st.warning(f"Parquet load failed for {ticker}: {e}")
 
@@ -317,10 +321,11 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
             )
             
             if not stock_data.empty:
-                # Save to Parquet cold storage for future speed
+                # FIX: Strip timezone from yfinance data before saving/comparing
+                if stock_data.index.tz is not None:
+                    stock_data.index = stock_data.index.tz_localize(None)
+                    
                 stock_data.to_parquet(parquet_path, engine='pyarrow', compression='snappy')
-                
-                # Push to TimescaleDB for live ops (if URI provided)
                 if db_uri:
                     push_to_timescaledb(stock_data, "intraday_prices" if interval != "1d" else "historical_prices", db_uri)
                     
@@ -333,8 +338,11 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
             st.error(f"yfinance failed for {yf_ticker}: {str(e)}")
             
     if data:
-        return pd.DataFrame(data).dropna()
+        df_final = pd.DataFrame(data)
+        df_final = df_final.ffill().bfill().dropna(axis=0, how='all')
+        return df_final
     return pd.DataFrame()
+
 
 # --- 5. SIDEBAR CONFIGURATION ---
 st.sidebar.markdown(
@@ -365,7 +373,6 @@ strategy_method = st.sidebar.selectbox(
     "Optimization Objective", ["Equal-Weight (1/N)", "Max Sharpe Ratio"]
 )
 
-# Adapt time options based on resolution choice
 if data_mode == "Intraday (5-Minute)":
     time_period = st.sidebar.selectbox("Historical Window", ["1 Day", "5 Days", "1 Month", "60 Days"], index=1)
     days_map = {"1 Day": 1, "5 Days": 5, "1 Month": 30, "60 Days": 60}
@@ -508,80 +515,39 @@ with tab3:
         st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
 
     st.markdown("<hr style='border-color: #3c4043; margin: 24px 0;'>", unsafe_allow_html=True)
-    
     st.info("💡 Tip: Click the refresh button (↻) at the top right to manually refresh market data.")
     
     col_t1, col_t2 = st.columns(2)
     placeholder_nse = col_t1.empty()
     placeholder_bse = col_t2.empty()
 
-    async def fetch_nse_live_async(client, symbol):
+    # FIX: Replaced brittle web scraping with robust yfinance fetching
+    def get_yf_quote(symbol, exchange):
+        import yfinance as yf
+        suffix = ".NS" if exchange == "NSE" else ".BO"
         try:
-            url = f"https://www.nseindia.com/api/quote-equity?symbol={symbol}"
-            response = await client.get(url, timeout=4.0)
-            if response.status_code == 200:
-                data = response.json()
-                p_info = data.get("priceInfo", {})
-                return {
-                    "Symbol": symbol,
-                    "Exchange": "NSE",
-                    "Last (₹)": p_info.get("lastPrice", 0.0),
-                    "Change (%)": p_info.get("pChange", 0.0),
-                }
+            ticker = yf.Ticker(f"{symbol}{suffix}")
+            curr = ticker.fast_info.get('lastPrice')
+            prev = ticker.fast_info.get('previousClose')
+            
+            if curr and prev:
+                change = round(((curr - prev) / prev) * 100, 2)
+                return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": change}
         except Exception:
             pass
-        return {"Symbol": symbol, "Exchange": "NSE", "Last (₹)": "N/A", "Change (%)": "N/A"}
+        return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
-    async def fetch_bse_live_async(client, symbol):
-        try:
-            search_url = f"https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text={symbol}&flag=site"
-            resp = await client.get(search_url, timeout=4.0)
-            soup = BeautifulSoup(resp.content, "html.parser")
-            a_tag = soup.find("a")
-            if a_tag and "href" in a_tag.attrs:
-                code_match = re.search(r"/(\d+)/", a_tag["href"])
-                if code_match:
-                    scrip_code = code_match.group(1)
-                    quote_url = f"https://api.bseindia.com/BseIndiaAPI/api/StockReachGraph/w?&scripcode={scrip_code}&flag=0"
-                    q_resp = await client.get(quote_url, timeout=4.0)
-                    q_data = q_resp.json()
-                    curr_val = q_data.get("CurrVal")
-                    prev_close = q_data.get("PrevClose")
-                    p_change = round(((float(curr_val) - float(prev_close)) / float(prev_close)) * 100, 2) if curr_val and prev_close else 0.0
-                    
-                    return {
-                        "Symbol": symbol,
-                        "Exchange": "BSE",
-                        "Last (₹)": float(curr_val) if curr_val else "N/A",
-                        "Change (%)": p_change,
-                    }
-        except Exception:
-            pass
-        return {"Symbol": symbol, "Exchange": "BSE", "Last (₹)": "N/A", "Change (%)": "N/A"}
+    async def fetch_live_async(symbol, exchange):
+        return await asyncio.to_thread(get_yf_quote, symbol, exchange)
 
     @exchange_breaker
     def execute_exchange_fetch(nse_tuple, bse_tuple):
         async def fetch_all():
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Referer': 'https://www.nseindia.com/'
-            }
-            
-            async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
-                try:
-                    await client.get("https://www.nseindia.com", timeout=5.0)
-                except Exception:
-                    pass
-                
-                nse_tasks = [fetch_nse_live_async(client, sym) for sym in nse_tuple]
-                bse_tasks = [fetch_bse_live_async(client, sym) for sym in bse_tuple]
-                nse_res = await asyncio.gather(*nse_tasks)
-                bse_res = await asyncio.gather(*bse_tasks)
-                return pd.DataFrame(nse_res), pd.DataFrame(bse_res)
-
+            nse_tasks = [fetch_live_async(sym, "NSE") for sym in nse_tuple]
+            bse_tasks = [fetch_live_async(sym, "BSE") for sym in bse_tuple]
+            nse_res = await asyncio.gather(*nse_tasks)
+            bse_res = await asyncio.gather(*bse_tasks)
+            return pd.DataFrame(nse_res), pd.DataFrame(bse_res)
         return asyncio.run(fetch_all())
 
     @st.cache_data(ttl=15)
@@ -614,7 +580,6 @@ if run_button:
             start_date = (datetime.today() - timedelta(days=lookback)).strftime("%Y-%m-%d")
             end_date = datetime.today().strftime("%Y-%m-%d")
 
-            # Execute Hybrid Data Fetch (Parquet -> yfinance -> Timescale)
             df_prices = fetch_stock_data_hybrid(
                 tickers, 
                 start_date=start_date, 
@@ -627,7 +592,10 @@ if run_button:
                 st.error(f"Data pipeline failed. Could not retrieve historical data for: {tickers}")
             else:
                 method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
-                strategy = RebalancingStrategy(tickers, method=method_mapping)
+                
+                # FIX: Only pass tickers that successfully fetched data to prevent crash
+                valid_tickers = df_prices.columns.tolist()
+                strategy = RebalancingStrategy(valid_tickers, method=method_mapping)
                 target_weights = strategy.calculate_weights()
 
                 safe_weights, risk_status, current_dd = check_portfolio_risk(
@@ -678,3 +646,5 @@ if "quant_results" in st.session_state:
     with tab7:
         st.markdown("<br>", unsafe_allow_html=True)
         st.line_chart(res["df_prices"])
+
+
