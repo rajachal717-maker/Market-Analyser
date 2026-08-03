@@ -506,6 +506,8 @@ with tab3:
     def get_yf_quote(symbol, exchange):
         import yfinance as yf
         import requests
+        from bs4 import BeautifulSoup
+        import re
         
         symbol = symbol.strip().upper()
         yf_ticker = None
@@ -513,26 +515,46 @@ with tab3:
         if exchange == "NSE":
             yf_ticker = f"{symbol}.NS"
         else:
-            # BSE Name-to-Code Auto-Resolver via Yahoo Search API
+            # 1. PRIMARY RESOLVER: BSE Official Search API
+            # Highly accurate for mapping names (ZOMATO) to codes (543320)
             try:
-                url = f"https://query2.finance.yahoo.com/v1/finance/search?q={symbol}"
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                res = requests.get(url, headers=headers, timeout=3)
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                }
+                search_url = f"https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text={symbol}&flag=site"
+                res = requests.get(search_url, headers=headers, timeout=4)
+                
                 if res.status_code == 200:
-                    quotes = res.json().get('quotes', [])
-                    for q in quotes:
-                        # Grab the first result that is listed on the BSE (.BO)
-                        if q.get('symbol', '').endswith('.BO'):
-                            yf_ticker = q.get('symbol')
-                            break
+                    soup = BeautifulSoup(res.content, "html.parser")
+                    a_tag = soup.find("a")
+                    if a_tag and "href" in a_tag.attrs:
+                        code_match = re.search(r"/(\d+)/", a_tag["href"])
+                        if code_match:
+                            scrip_code = code_match.group(1)
+                            yf_ticker = f"{scrip_code}.BO"
             except Exception as e:
                 pass
+                
+            # 2. FALLBACK RESOLVER: Yahoo Finance Search
+            if not yf_ticker:
+                try:
+                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={symbol}"
+                    res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
+                    if res.status_code == 200:
+                        quotes = res.json().get('quotes', [])
+                        for q in quotes:
+                            if q.get('symbol', '').endswith('.BO'):
+                                yf_ticker = q.get('symbol')
+                                break
+                except Exception:
+                    pass
             
-            # Fallback if search fails
+            # 3. FINAL FALLBACK: Assume the user typed the numeric code directly
             if not yf_ticker:
                 yf_ticker = f"{symbol}.BO"
 
-        # Fetch the actual live quote
+        # Fetch the live quote from yfinance using the resolved code
         try:
             ticker = yf.Ticker(yf_ticker)
             curr = ticker.fast_info.get('lastPrice')
@@ -541,9 +563,9 @@ with tab3:
             if curr and prev:
                 change = round(((curr - prev) / prev) * 100, 2)
                 
-                # Show the resolved numeric code if it's BSE, otherwise standard name
+                # Format output nicely (e.g. "ZOMATO (543320)")
                 display_sym = yf_ticker.replace('.NS', '').replace('.BO', '')
-                if exchange == "BSE" and display_sym != symbol:
+                if exchange == "BSE" and display_sym != symbol and display_sym.isdigit():
                     display_sym = f"{symbol} ({display_sym})"
                     
                 return {"Symbol": display_sym, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": change}
@@ -551,7 +573,7 @@ with tab3:
             pass
             
         return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
-
+    
     # 2. --- 🔍 QUICK SEARCH BAR ---
     st.markdown("<div style='font-size: 14px; font-weight: 500; color: #e3e3e3; margin-bottom: 8px;'>🔍 Quick Quote Search</div>", unsafe_allow_html=True)
     
