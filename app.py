@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 import os
+import io
+import secrets
 import pandas as pd
+import numpy as np
 import streamlit as st
 from supabase import Client, create_client
 import time
@@ -12,11 +15,12 @@ import asyncio
 import httpx
 import pybreaker
 import logging
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 # ===== CLOUD API CONFIGURATION =====
 CLOUD_API_URL = os.environ.get("API_URL") or "http://127.0.0.1:8000"
 
-# Page Configuration (Must be the first Streamlit command)
+# Page Configuration
 st.set_page_config(
     page_title="Institutional Quant Terminal",
     page_icon="✨",
@@ -35,22 +39,35 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+# --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
+class SecurityVault:
+    def __init__(self):
+        if "vault_key" not in st.session_state:
+            st.session_state.vault_key = AESGCM.generate_key(bit_length=256)
+        self.aes = AESGCM(st.session_state.vault_key)
+
+    def encrypt_data(self, data: bytes) -> bytes:
+        nonce = secrets.token_bytes(12)
+        return nonce + self.aes.encrypt(nonce, data, None)
+
+    def decrypt_data(self, token: bytes) -> bytes:
+        return self.aes.decrypt(token[:12], token[12:], None)
+
+vault = SecurityVault()
+
 # --- FINTECH OLED GLOBAL CSS CONFIGURATION ---
 THEME_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Main Body & Backgrounds (OLED Black) */
 html, body, [class*="css"], .stApp {
     font-family: 'Inter', sans-serif;
     background-color: #000000 !important;
     color: #E3E3E3;
 }
 
-/* Hide Streamlit Header */
 header { background-color: transparent !important; }
 
-/* Sidebar styling */
 [data-testid="stSidebar"] {
     background-color: #0A0A0A !important;
     border-right: 1px solid #1A1A1A;
@@ -61,7 +78,6 @@ header { background-color: transparent !important; }
     font-size: 13px;
 }
 
-/* Inputs & Form Fields */
 .stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
     background-color: #121212 !important;
     color: #FFFFFF !important;
@@ -75,7 +91,6 @@ header { background-color: transparent !important; }
     box-shadow: 0 0 0 1px #2962FF !important;
 }
 
-/* Buttons */
 .stButton>button {
     background-color: #2962FF;
     color: #FFFFFF;
@@ -91,7 +106,6 @@ header { background-color: transparent !important; }
     transform: translateY(-1px);
 }
 
-/* Form Submit overrides */
 [data-testid="stForm"] .stButton>button {
     background-color: transparent;
     border: 1px solid #2962FF;
@@ -101,7 +115,6 @@ header { background-color: transparent !important; }
     background-color: rgba(41, 98, 255, 0.1);
 }
 
-/* Modern Minimalist Tabs */
 .stTabs [data-baseweb="tab-list"] {
     background-color: transparent;
     gap: 24px;
@@ -123,7 +136,6 @@ header { background-color: transparent !important; }
     border-bottom: 3px solid #2962FF;
 }
 
-/* Style the Metric Cards (Glass/Dark Panel Effect) */
 div[data-testid="metric-container"] {
     background-color: #121212; 
     border: 1px solid #2B2B2B; 
@@ -132,8 +144,6 @@ div[data-testid="metric-container"] {
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
     transition: transform 0.2s ease-in-out, border 0.2s ease-in-out;
 }
-
-/* Slight hover effect for interactivity */
 div[data-testid="metric-container"]:hover {
     transform: translateY(-2px);
     border: 1px solid #2962FF; 
@@ -152,64 +162,28 @@ div[data-testid="metric-container"]:hover {
     font-weight: 600 !important;
 }
 
-/* Vibrant Colors for Profit and Loss */
-div[data-testid="stMetricDelta"] svg[title="Up"] {
-    color: #00E676 !important; 
-}
-div[data-testid="stMetricDelta"] > div:has(svg[title="Up"]) {
-    color: #00E676 !important;
-    font-weight: 600;
-}
-div[data-testid="stMetricDelta"] svg[title="Down"] {
-    color: #FF1744 !important; 
-}
-div[data-testid="stMetricDelta"] > div:has(svg[title="Down"]) {
-    color: #FF1744 !important;
-    font-weight: 600;
-}
+div[data-testid="stMetricDelta"] svg[title="Up"] { color: #00E676 !important; }
+div[data-testid="stMetricDelta"] > div:has(svg[title="Up"]) { color: #00E676 !important; font-weight: 600; }
+div[data-testid="stMetricDelta"] svg[title="Down"] { color: #FF1744 !important; }
+div[data-testid="stMetricDelta"] > div:has(svg[title="Down"]) { color: #FF1744 !important; font-weight: 600; }
 
-/* Chat Interface */
-[data-testid="stChatMessage"] {
-    background-color: transparent !important;
-}
-[data-testid="stChatInput"] {
-    background-color: #121212 !important;
-    border: 1px solid #2B2B2B !important;
-    border-radius: 8px !important;
-}
-[data-testid="stChatInput"] textarea {
-    color: #FFFFFF !important;
-}
+[data-testid="stChatMessage"] { background-color: transparent !important; }
+[data-testid="stChatInput"] { background-color: #121212 !important; border: 1px solid #2B2B2B !important; border-radius: 8px !important; }
+[data-testid="stChatInput"] textarea { color: #FFFFFF !important; }
 
-/* Dataframes */
-[data-testid="stDataFrame"] {
-    border: 1px solid #1A1A1A;
-    border-radius: 12px;
-    overflow: hidden;
-}
+[data-testid="stDataFrame"] { border: 1px solid #1A1A1A; border-radius: 12px; overflow: hidden; }
 
-/* Typography Overrides */
-h1, h2, h3, h4, h5 {
-    color: #FFFFFF !important;
-    font-weight: 600 !important;
-    letter-spacing: -0.5px;
-}
+h1, h2, h3, h4, h5 { color: #FFFFFF !important; font-weight: 600 !important; letter-spacing: -0.5px; }
 </style>
 """
 
-# --- 2. AUTHENTICATION UI & GATEKEEPER ---
+# --- 3. AUTHENTICATION GATEKEEPER ---
 if "user" not in st.session_state:
     st.session_state.user = None
 
 if not st.session_state.user:
     st.markdown(THEME_CSS, unsafe_allow_html=True)
-    st.markdown(
-        """
-        <style>
-        .block-container { max-width: 500px; padding-top: 6rem; }
-        </style>
-        """, unsafe_allow_html=True
-    )
+    st.markdown("<style>.block-container { max-width: 500px; padding-top: 6rem; }</style>", unsafe_allow_html=True)
 
     st.markdown("<h2 style='text-align: center; margin-bottom: 8px;'>✨ Welcome to Terminal</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #9AA0A6; font-size: 14px; margin-bottom: 32px;'>Sign in to access your quantitative workflows.</p>", unsafe_allow_html=True)
@@ -230,7 +204,7 @@ if not st.session_state.user:
                         "password": login_password,
                     })
                     st.session_state.user = response.user
-                    st.success("Authentication successful! Initializing...")
+                    st.success("Authentication successful! Initializing Crypto Vault...")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login failed: {e}")
@@ -257,11 +231,9 @@ if not st.session_state.user:
 # =====================================================================
 # MAIN APPLICATION
 # =====================================================================
-
-# Inject Global CSS
 st.markdown(THEME_CSS, unsafe_allow_html=True)
 
-# --- 3. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
+# --- 4. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
 from strategy import RebalancingStrategy
 from backtester import run_backtest
 from risk_manager import check_portfolio_risk
@@ -302,23 +274,23 @@ def push_to_timescaledb(df, table_name, db_uri):
 @st.cache_data(ttl=0)
 def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri=None):
     import yfinance as yf
-    import pandas as pd
-    import streamlit as st
-    import os
     
     os.makedirs("market_data", exist_ok=True)
     data = {}
     
     for ticker in tickers:
         yf_ticker = ticker if ("." in ticker) else f"{ticker}.NS"
-        parquet_path = f"market_data/{yf_ticker}_{interval}.parquet"
+        parquet_path = f"market_data/{yf_ticker}_{interval}.parquet.enc"
         
-        # PATH 1: Attempt local Parquet load
         if os.path.exists(parquet_path):
             try:
-                df_ticker = pd.read_parquet(parquet_path, engine='pyarrow')
+                with open(parquet_path, "rb") as f:
+                    encrypted_bytes = f.read()
                 
-                # FIX: Strip timezone from the index to allow safe date comparisons
+                decrypted_bytes = vault.decrypt_data(encrypted_bytes)
+                buf = io.BytesIO(decrypted_bytes)
+                df_ticker = pd.read_parquet(buf, engine='pyarrow')
+                
                 if df_ticker.index.tz is not None:
                     df_ticker.index = df_ticker.index.tz_localize(None)
                     
@@ -328,9 +300,8 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
                     data[ticker] = df_ticker['Close']
                     continue
             except Exception as e:
-                st.warning(f"Parquet load failed for {ticker}: {e}")
+                st.warning(f"Encrypted load failed for {ticker}: {e}")
 
-        # PATH 2: Fallback to yfinance API
         try:
             stock_data = yf.download(
                 yf_ticker, 
@@ -342,11 +313,16 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
             )
             
             if not stock_data.empty:
-                # FIX: Strip timezone from yfinance data before saving/comparing
                 if stock_data.index.tz is not None:
                     stock_data.index = stock_data.index.tz_localize(None)
                     
-                stock_data.to_parquet(parquet_path, engine='pyarrow', compression='snappy')
+                buf = io.BytesIO()
+                stock_data.to_parquet(buf, engine='pyarrow', compression='snappy')
+                encrypted_payload = vault.encrypt_data(buf.getvalue())
+                
+                with open(parquet_path, "wb") as f:
+                    f.write(encrypted_payload)
+                    
                 if db_uri:
                     push_to_timescaledb(stock_data, "intraday_prices" if interval != "1d" else "historical_prices", db_uri)
                     
@@ -364,6 +340,13 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
         return df_final
     return pd.DataFrame()
 
+# --- HELPER TECHNICAL CALCULATIONS ---
+def calculate_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
 
 # --- 5. SIDEBAR CONFIGURATION ---
 st.sidebar.markdown(
@@ -379,6 +362,7 @@ st.sidebar.markdown(
 if st.sidebar.button("Sign Out", width="stretch"):
     supabase.auth.sign_out()
     st.session_state.user = None
+    st.session_state.pop("vault_key", None)
     st.rerun()
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
@@ -411,14 +395,17 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 run_button = st.sidebar.button("Execute Pipeline", width="stretch")
 
 # --- 6. MAIN APPLICATION HEADER ---
-col_h1, col_h2 = st.columns([4, 1])
+col_h1, col_h2 = st.columns([3, 2])
 with col_h1:
     st.markdown("<h2 style='margin-bottom: 4px;'>Institutional Intelligence Terminal</h2>", unsafe_allow_html=True)
     st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Advanced Quantitative Strategy Execution & AI Analysis</p>", unsafe_allow_html=True)
 with col_h2:
     st.markdown(
         """
-        <div style='text-align: right; padding-top: 16px;'>
+        <div style='text-align: right; padding-top: 16px; display: flex; gap: 8px; justify-content: flex-end;'>
+            <span style='background-color: rgba(41, 98, 255, 0.1); color: #2962FF; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(41, 98, 255, 0.2);'>
+                🔒 AES-256 SECURED
+            </span>
             <span style='background-color: rgba(0, 230, 118, 0.1); color: #00E676; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(0, 230, 118, 0.2);'>
                 ● ONLINE
             </span>
@@ -430,7 +417,7 @@ with col_h2:
 st.markdown("<br>", unsafe_allow_html=True)
 
 # --- 7. NAVIGATION TABS LAYOUT ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
     [
         "AI Assistant",
         "Web Intelligence",
@@ -439,6 +426,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "Optimal Weights",
         "Analytics",
         "Price History",
+        "Screener & Diagnostics",
     ]
 )
 
@@ -523,7 +511,6 @@ with tab2:
 with tab3:
     st.markdown("<br>", unsafe_allow_html=True)
     
-    # 1. Helper function with Intelligent Ticker Resolution
     def get_yf_quote(symbol, exchange):
         import yfinance as yf
         import requests
@@ -536,8 +523,6 @@ with tab3:
         if exchange == "NSE":
             yf_ticker = f"{symbol}.NS"
         else:
-            # 1. PRIMARY RESOLVER: BSE Official Search API
-            # Highly accurate for mapping names (ZOMATO) to codes (543320)
             try:
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -554,10 +539,9 @@ with tab3:
                         if code_match:
                             scrip_code = code_match.group(1)
                             yf_ticker = f"{scrip_code}.BO"
-            except Exception as e:
+            except Exception:
                 pass
                 
-            # 2. FALLBACK RESOLVER: Yahoo Finance Search
             if not yf_ticker:
                 try:
                     url = f"https://query2.finance.yahoo.com/v1/finance/search?q={symbol}"
@@ -571,11 +555,9 @@ with tab3:
                 except Exception:
                     pass
             
-            # 3. FINAL FALLBACK: Assume the user typed the numeric code directly
             if not yf_ticker:
                 yf_ticker = f"{symbol}.BO"
 
-        # Fetch the live quote from yfinance using the resolved code
         try:
             ticker = yf.Ticker(yf_ticker)
             curr = ticker.fast_info.get('lastPrice')
@@ -583,8 +565,6 @@ with tab3:
             
             if curr and prev:
                 change = round(((curr - prev) / prev) * 100, 2)
-                
-                # Format output nicely (e.g. "ZOMATO (543320)")
                 display_sym = yf_ticker.replace('.NS', '').replace('.BO', '')
                 if exchange == "BSE" and display_sym != symbol and display_sym.isdigit():
                     display_sym = f"{symbol} ({display_sym})"
@@ -595,7 +575,6 @@ with tab3:
             
         return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
     
-    # 2. --- 🔍 QUICK SEARCH BAR ---
     st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>🔍 Quick Quote Search</div>", unsafe_allow_html=True)
     
     col_sq1, col_sq2, col_sq3 = st.columns([3, 1, 1])
@@ -608,7 +587,7 @@ with tab3:
 
     if search_quote_btn:
         if search_ticker.strip():
-            with st.spinner(f"Resolving and fetching quote for {search_ticker.strip().upper()}..."):
+            with st.spinner(f"Resolving quote for {search_ticker.strip().upper()}..."):
                 quote = get_yf_quote(search_ticker, search_exchange)
                 if quote["Last (₹)"] != "N/A":
                     col_r1, col_r2, col_r3 = st.columns(3)
@@ -616,13 +595,12 @@ with tab3:
                     col_r2.metric("Last Price", f"₹{quote['Last (₹)']}")
                     col_r3.metric("Daily Change", f"{quote['Change (%)']}%")
                 else:
-                    st.error(f"Could not retrieve live quote for '{search_ticker.upper()}' on {search_exchange}. Verify the company name.")
+                    st.error(f"Could not retrieve quote for '{search_ticker.upper()}' on {search_exchange}.")
         else:
             st.warning("Please enter a company name or ticker.")
 
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
 
-    # 3. --- MANAGED WATCHLISTS ---
     st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>📋 Managed Watchlists</div>", unsafe_allow_html=True)
     with st.form("watchlist_form", border=False):
         col_w1, col_w2 = st.columns(2)
@@ -637,7 +615,7 @@ with tab3:
         st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
         st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
 
-    st.info("💡 Tip: You can now type company names (e.g. ZOMATO) into the BSE watchlist. The system will auto-resolve them!")
+    st.info("💡 Tip: You can type company names into the BSE watchlist. The system will auto-resolve them!")
     
     col_t1, col_t2 = st.columns(2)
     placeholder_nse = col_t1.empty()
@@ -665,13 +643,11 @@ with tab3:
             df_fallback_bse = pd.DataFrame([{"Symbol": s, "Exchange": "BSE", "Last (₹)": "Offline", "Change (%)": 0.0} for s in bse_tuple])
             return df_fallback_nse, df_fallback_bse
 
-    # Fetch live market data
     df_nse, df_bse = get_cached_live_markets_safe(
         tuple(st.session_state.nse_watchlist), 
         tuple(st.session_state.bse_watchlist)
     )
 
-    # --- FIX: Convert mixed-type columns to string to prevent PyArrow serialization errors ---
     if not df_nse.empty:
         df_nse["Last (₹)"] = df_nse["Last (₹)"].astype(str)
         df_nse["Change (%)"] = df_nse["Change (%)"].astype(str)
@@ -679,13 +655,87 @@ with tab3:
         df_bse["Last (₹)"] = df_bse["Last (₹)"].astype(str)
         df_bse["Change (%)"] = df_bse["Change (%)"].astype(str)
 
-    # Display DataFrames
     placeholder_nse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>NSE Equities</h4>", unsafe_allow_html=True)
     placeholder_nse.dataframe(df_nse, width="stretch", hide_index=True)
 
     placeholder_bse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
+
+# --- TAB 8: STOCK SCREENER & DEEP ANALYZER ---
+with tab8:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<h4 style='font-size: 16px;'>⚡ Technical & Fundamental Stock Screener</h4>", unsafe_allow_html=True)
     
+    screen_col1, screen_col2 = st.columns([3, 1])
+    with screen_col1:
+        target_symbol = st.text_input("Enter Ticker to Scan", value="RELIANCE", placeholder="e.g. RELIANCE, TCS, VMART").strip().upper()
+    with screen_col2:
+        scan_btn = st.button("Run Diagnostic Scan", width="stretch")
+
+    if scan_btn or target_symbol:
+        import yfinance as yf
+        yf_target = target_symbol if ("." in target_symbol) else f"{target_symbol}.NS"
+        
+        with st.spinner(f"Fetching technical & fundamental indicators for {target_symbol}..."):
+            try:
+                ticker_obj = yf.Ticker(yf_target)
+                hist = ticker_obj.history(period="6mo")
+                info = ticker_obj.info
+                
+                if not hist.empty:
+                    # 1. Technical Indicators
+                    hist['EMA20'] = hist['Close'].ewm(span=20, adjust=False).mean()
+                    hist['EMA50'] = hist['Close'].ewm(span=50, adjust=False).mean()
+                    hist['RSI'] = calculate_rsi(hist['Close'])
+                    
+                    last_price = hist['Close'].iloc[-1]
+                    last_rsi = round(hist['RSI'].iloc[-1], 2)
+                    last_ema20 = hist['EMA20'].iloc[-1]
+                    last_ema50 = hist['EMA50'].iloc[-1]
+                    
+                    vol_avg = hist['Volume'].rolling(20).mean().iloc[-1]
+                    last_vol = hist['Volume'].iloc[-1]
+                    vol_surge = (last_vol > 1.2 * vol_avg) if vol_avg > 0 else False
+                    
+                    # Trend Assessment
+                    trend_signal = "🟢 BULLISH (20 EMA > 50 EMA)" if last_ema20 > last_ema50 else "🔴 BEARISH (20 EMA < 50 EMA)"
+                    rsi_status = "🔥 Overbought" if last_rsi > 70 else ("🧊 Oversold" if last_rsi < 30 else "⚖️ Neutral")
+                    
+                    # 2. Fundamentals
+                    pe_ratio = info.get("trailingPE", "N/A")
+                    pb_ratio = info.get("priceToBook", "N/A")
+                    roe = info.get("returnOnEquity", "N/A")
+                    roe_str = f"{round(roe * 100, 2)}%" if isinstance(roe, (int, float)) else "N/A"
+                    debt_to_eq = info.get("debtToEquity", "N/A")
+                    profit_margin = info.get("profitMargins", "N/A")
+                    margin_str = f"{round(profit_margin * 100, 2)}%" if isinstance(profit_margin, (int, float)) else "N/A"
+
+                    # Technical Metrics Display
+                    st.markdown("<h5 style='color:#2962FF; font-size: 14px;'>Technical Momentum Signals</h5>", unsafe_allow_html=True)
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Current Price", f"₹{round(last_price, 2)}")
+                    m2.metric("RSI (14)", f"{last_rsi}", delta=rsi_status, delta_color="off")
+                    m3.metric("Trend Signal", trend_signal.split()[0], delta=trend_signal.split()[1])
+                    m4.metric("Volume Spike", "YES ⚡" if vol_surge else "NORMAL")
+
+                    st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0;'>", unsafe_allow_html=True)
+
+                    # Fundamental Metrics Display
+                    st.markdown("<h5 style='color:#00E676; font-size: 14px;'>Fundamental Health Overview</h5>", unsafe_allow_html=True)
+                    f1, f2, f3, f4 = st.columns(4)
+                    f1.metric("Trailing P/E Ratio", f"{pe_ratio if isinstance(pe_ratio, (int, float)) else 'N/A'}")
+                    f2.metric("Price-to-Book (P/B)", f"{pb_ratio if isinstance(pb_ratio, (int, float)) else 'N/A'}")
+                    f3.metric("Return on Equity (ROE)", roe_str)
+                    f4.metric("Profit Margin", margin_str)
+
+                    # Interactive Technical Chart
+                    st.markdown("<br><h5 style='font-size: 14px;'>Price Action & Moving Averages (20 vs 50 EMA)</h5>", unsafe_allow_html=True)
+                    st.line_chart(hist[['Close', 'EMA20', 'EMA50']])
+
+                else:
+                    st.error(f"Could not retrieve historical price action for {target_symbol}.")
+            except Exception as e:
+                st.error(f"Error executing scan: {e}")
 
 # --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
 if run_button:
@@ -712,10 +762,8 @@ if run_button:
                 st.error(f"Data pipeline failed. Could not retrieve historical data for: {tickers}")
             else:
                 method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
-                
                 valid_tickers = df_prices.columns.tolist()
                 
-                # Instantiating the upgraded RebalancingStrategy
                 strategy = RebalancingStrategy(valid_tickers, df_prices=df_prices, method=method_mapping)
                 target_weights = strategy.calculate_weights()
 
