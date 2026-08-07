@@ -394,7 +394,56 @@ max_dd_limit = st.sidebar.slider(
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 run_button = st.sidebar.button("Execute Pipeline", width="stretch")
 
-# --- 6. MAIN APPLICATION HEADER ---
+
+# --- 6. EXECUTION ENGINE FOR QUANTITATIVE PIPELINE (MOVED UP) ---
+if run_button:
+    tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
+
+    if not tickers:
+        st.error("Please supply valid asset ticker symbols.")
+    else:
+        with st.spinner("Compiling quantitative models via Hybrid Pipeline..."):
+            
+            lookback = days_map.get(time_period, 365)
+            start_date = (datetime.today() - timedelta(days=lookback)).strftime("%Y-%m-%d")
+            end_date = datetime.today().strftime("%Y-%m-%d")
+
+            df_prices = fetch_stock_data_hybrid(
+                tickers, 
+                start_date=start_date, 
+                end_date=end_date, 
+                interval=active_interval,
+                db_uri=db_connection if db_connection else None
+            )
+
+            if df_prices.empty:
+                st.error(f"Data pipeline failed. Could not retrieve historical data for: {tickers}")
+            else:
+                method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
+                valid_tickers = df_prices.columns.tolist()
+                
+                strategy = RebalancingStrategy(valid_tickers, df_prices=df_prices, method=method_mapping)
+                target_weights = strategy.calculate_weights()
+
+                safe_weights, risk_status, current_dd = check_portfolio_risk(
+                    df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0
+                )
+
+                metrics, equity_curve = run_backtest(df_prices, safe_weights)
+
+                st.session_state.quant_results = {
+                    "df_prices": df_prices,
+                    "safe_weights": safe_weights,
+                    "risk_status": risk_status,
+                    "current_dd": current_dd,
+                    "metrics": metrics,
+                    "equity_curve": equity_curve
+                }
+        # We don't need the success message outside the tab anymore, 
+        # the tab itself will populate successfully now.
+
+
+# --- 7. MAIN APPLICATION HEADER ---
 col_h1, col_h2 = st.columns([3, 2])
 with col_h1:
     st.markdown("<h2 style='margin-bottom: 4px;'>Institutional Intelligence Terminal</h2>", unsafe_allow_html=True)
@@ -416,7 +465,7 @@ with col_h2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- 7. NAVIGATION TABS LAYOUT (Consolidated) ---
+# --- 8. NAVIGATION TABS LAYOUT (Consolidated) ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "AI Assistant",
@@ -666,6 +715,9 @@ with tab4:
         st.info("💡 Run the **Execute Pipeline** action from the sidebar to generate portfolio models and quantitative metrics.")
     else:
         res = st.session_state.quant_results
+        
+        # Adding a success message right at the top of the tab
+        st.success("Pipeline executed successfully! Results loaded.")
 
         # 1. Risk Status Section
         st.markdown("<h4 style='font-size: 16px;'>🛡️ Risk Diagnostics</h4>", unsafe_allow_html=True)
@@ -772,49 +824,3 @@ with tab5:
                     st.error(f"Could not retrieve historical price action for {target_symbol}.")
             except Exception as e:
                 st.error(f"Error executing scan: {e}")
-
-# --- EXECUTION ENGINE FOR QUANTITATIVE PIPELINE ---
-if run_button:
-    tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
-
-    if not tickers:
-        st.error("Please supply valid asset ticker symbols.")
-    else:
-        with st.spinner("Compiling quantitative models via Hybrid Pipeline..."):
-            
-            lookback = days_map.get(time_period, 365)
-            start_date = (datetime.today() - timedelta(days=lookback)).strftime("%Y-%m-%d")
-            end_date = datetime.today().strftime("%Y-%m-%d")
-
-            df_prices = fetch_stock_data_hybrid(
-                tickers, 
-                start_date=start_date, 
-                end_date=end_date, 
-                interval=active_interval,
-                db_uri=db_connection if db_connection else None
-            )
-
-            if df_prices.empty:
-                st.error(f"Data pipeline failed. Could not retrieve historical data for: {tickers}")
-            else:
-                method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
-                valid_tickers = df_prices.columns.tolist()
-                
-                strategy = RebalancingStrategy(valid_tickers, df_prices=df_prices, method=method_mapping)
-                target_weights = strategy.calculate_weights()
-
-                safe_weights, risk_status, current_dd = check_portfolio_risk(
-                    df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0
-                )
-
-                metrics, equity_curve = run_backtest(df_prices, safe_weights)
-
-                st.session_state.quant_results = {
-                    "df_prices": df_prices,
-                    "safe_weights": safe_weights,
-                    "risk_status": risk_status,
-                    "current_dd": current_dd,
-                    "metrics": metrics,
-                    "equity_curve": equity_curve
-                }
-        st.success("Pipeline executed successfully! Check the **Portfolio & Quant Suite** tab.")
