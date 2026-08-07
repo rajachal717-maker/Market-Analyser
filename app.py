@@ -416,16 +416,13 @@ with col_h2:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# --- 7. NAVIGATION TABS LAYOUT ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+# --- 7. NAVIGATION TABS LAYOUT (Consolidated) ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "AI Assistant",
         "Web Intelligence",
         "Live Market Feed",
-        "Risk Diagnostics",
-        "Optimal Weights",
-        "Analytics",
-        "Price History",
+        "Portfolio & Quant Suite",
         "Screener & Diagnostics",
     ]
 )
@@ -661,8 +658,54 @@ with tab3:
     placeholder_bse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
     placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
 
-# --- TAB 8: STOCK SCREENER & DEEP ANALYZER ---
-with tab8:
+# --- TAB 4: PORTFOLIO & QUANT SUITE (Consolidated) ---
+with tab4:
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    if "quant_results" not in st.session_state:
+        st.info("💡 Run the **Execute Pipeline** action from the sidebar to generate portfolio models and quantitative metrics.")
+    else:
+        res = st.session_state.quant_results
+
+        # 1. Risk Status Section
+        st.markdown("<h4 style='font-size: 16px;'>🛡️ Risk Diagnostics</h4>", unsafe_allow_html=True)
+        if "CIRCUIT BREAKER" in res["risk_status"]:
+            st.error(res["risk_status"])
+        elif "WARNING" in res["risk_status"]:
+            st.warning(res["risk_status"])
+        else:
+            st.success(f"Status: Nominal (Current Drawdown: {res['current_dd']*100:.2f}%)")
+
+        st.markdown("<hr style='border-color: #2B2B2B; margin: 20px 0;'>", unsafe_allow_html=True)
+
+        # 2. Optimal Weights Section
+        st.markdown("<h4 style='font-size: 16px;'>⚖️ Optimal Portfolio Allocations</h4>", unsafe_allow_html=True)
+        cols = st.columns(len(res["safe_weights"]) if res["safe_weights"] else 1)
+        for i, (ticker, weight) in enumerate(res["safe_weights"].items()):
+            with cols[i]:
+                st.metric(label=ticker, value=f"{weight * 100:.2f}%")
+
+        st.markdown("<hr style='border-color: #2B2B2B; margin: 20px 0;'>", unsafe_allow_html=True)
+
+        # 3. Analytics Metrics Section
+        st.markdown("<h4 style='font-size: 16px;'>📈 Quantitative Performance Analytics</h4>", unsafe_allow_html=True)
+        m_cols = st.columns(4)
+        m_cols[0].metric("CAGR", f"{res['metrics'].get('CAGR', 0)}%")
+        m_cols[1].metric("Sharpe Ratio", f"{res['metrics'].get('Sharpe Ratio', 0)}")
+        m_cols[2].metric("Ann. Volatility", f"{res['metrics'].get('Annualized Volatility', 0)}%")
+        m_cols[3].metric("Max Drawdown", f"{res['metrics'].get('Maximum Drawdown', 0)}%")
+
+        st.markdown("<br><h5 style='font-size: 14px;'>Portfolio Equity Curve</h5>", unsafe_allow_html=True)
+        st.line_chart(res["equity_curve"])
+
+        st.markdown("<hr style='border-color: #2B2B2B; margin: 20px 0;'>", unsafe_allow_html=True)
+
+        # 4. Price History Section
+        st.markdown("<h4 style='font-size: 16px;'>📊 Asset Price History Matrix</h4>", unsafe_allow_html=True)
+        st.line_chart(res["df_prices"])
+
+# --- TAB 5: SCREENER & DIAGNOSTICS ---
+with tab5:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("<h4 style='font-size: 16px;'>⚡ Technical & Fundamental Stock Screener</h4>", unsafe_allow_html=True)
     
@@ -683,7 +726,6 @@ with tab8:
                 info = ticker_obj.info
                 
                 if not hist.empty:
-                    # 1. Technical Indicators
                     hist['EMA20'] = hist['Close'].ewm(span=20, adjust=False).mean()
                     hist['EMA50'] = hist['Close'].ewm(span=50, adjust=False).mean()
                     hist['RSI'] = calculate_rsi(hist['Close'])
@@ -697,20 +739,16 @@ with tab8:
                     last_vol = hist['Volume'].iloc[-1]
                     vol_surge = (last_vol > 1.2 * vol_avg) if vol_avg > 0 else False
                     
-                    # Trend Assessment
                     trend_signal = "🟢 BULLISH (20 EMA > 50 EMA)" if last_ema20 > last_ema50 else "🔴 BEARISH (20 EMA < 50 EMA)"
                     rsi_status = "🔥 Overbought" if last_rsi > 70 else ("🧊 Oversold" if last_rsi < 30 else "⚖️ Neutral")
                     
-                    # 2. Fundamentals
                     pe_ratio = info.get("trailingPE", "N/A")
                     pb_ratio = info.get("priceToBook", "N/A")
                     roe = info.get("returnOnEquity", "N/A")
                     roe_str = f"{round(roe * 100, 2)}%" if isinstance(roe, (int, float)) else "N/A"
-                    debt_to_eq = info.get("debtToEquity", "N/A")
                     profit_margin = info.get("profitMargins", "N/A")
                     margin_str = f"{round(profit_margin * 100, 2)}%" if isinstance(profit_margin, (int, float)) else "N/A"
 
-                    # Technical Metrics Display
                     st.markdown("<h5 style='color:#2962FF; font-size: 14px;'>Technical Momentum Signals</h5>", unsafe_allow_html=True)
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Current Price", f"₹{round(last_price, 2)}")
@@ -720,7 +758,6 @@ with tab8:
 
                     st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0;'>", unsafe_allow_html=True)
 
-                    # Fundamental Metrics Display
                     st.markdown("<h5 style='color:#00E676; font-size: 14px;'>Fundamental Health Overview</h5>", unsafe_allow_html=True)
                     f1, f2, f3, f4 = st.columns(4)
                     f1.metric("Trailing P/E Ratio", f"{pe_ratio if isinstance(pe_ratio, (int, float)) else 'N/A'}")
@@ -728,7 +765,6 @@ with tab8:
                     f3.metric("Return on Equity (ROE)", roe_str)
                     f4.metric("Profit Margin", margin_str)
 
-                    # Interactive Technical Chart
                     st.markdown("<br><h5 style='font-size: 14px;'>Price Action & Moving Averages (20 vs 50 EMA)</h5>", unsafe_allow_html=True)
                     st.line_chart(hist[['Close', 'EMA20', 'EMA50']])
 
@@ -737,7 +773,7 @@ with tab8:
             except Exception as e:
                 st.error(f"Error executing scan: {e}")
 
-# --- EXECUTION ENGINE FOR QUANTITATIVE TABS (4, 5, 6, 7) ---
+# --- EXECUTION ENGINE FOR QUANTITATIVE PIPELINE ---
 if run_button:
     tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
 
@@ -781,37 +817,4 @@ if run_button:
                     "metrics": metrics,
                     "equity_curve": equity_curve
                 }
-
-if "quant_results" in st.session_state:
-    res = st.session_state.quant_results
-
-    with tab4:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if "CIRCUIT BREAKER" in res["risk_status"]:
-            st.error(res["risk_status"])
-        elif "WARNING" in res["risk_status"]:
-            st.warning(res["risk_status"])
-        else:
-            st.success(f"Status: Nominal (Current Drawdown: {res['current_dd']*100:.2f}%)")
-
-    with tab5:
-        st.markdown("<br>", unsafe_allow_html=True)
-        cols = st.columns(len(res["safe_weights"]) if res["safe_weights"] else 1)
-        for i, (ticker, weight) in enumerate(res["safe_weights"].items()):
-            with cols[i]:
-                st.metric(label=ticker, value=f"{weight * 100:.2f}%")
-
-    with tab6:
-        st.markdown("<br>", unsafe_allow_html=True)
-        m_cols = st.columns(4)
-        m_cols[0].metric("CAGR", f"{res['metrics'].get('CAGR', 0)}%")
-        m_cols[1].metric("Sharpe Ratio", f"{res['metrics'].get('Sharpe Ratio', 0)}")
-        m_cols[2].metric("Ann. Volatility", f"{res['metrics'].get('Annualized Volatility', 0)}%")
-        m_cols[3].metric("Max Drawdown", f"{res['metrics'].get('Maximum Drawdown', 0)}%")
-
-        st.markdown("<br><h4 style='font-size: 16px;'>Equity Curve</h4>", unsafe_allow_html=True)
-        st.line_chart(res["equity_curve"])
-
-    with tab7:
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.line_chart(res["df_prices"])
+        st.success("Pipeline executed successfully! Check the **Portfolio & Quant Suite** tab.")
