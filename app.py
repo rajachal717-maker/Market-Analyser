@@ -33,22 +33,21 @@ exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # Get environment variable and sanitize quotes/whitespace
+    # Safely extract environment variables, stripping any accidental quotes or spaces
     raw_url = os.environ.get("SUPABASE_URL", "").strip().strip("'\"")
     raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
     
-    # Fallback to defaults if empty
+    # Fallback to defaults if variables are missing
     url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
     key = raw_key if raw_key else "sb_publishable_C087lxhuIIfwtXmFj-taIw_nR_z1Og7"
     
-    # Ensure URL starts with scheme
-    if not url.startswith("http://") and not url.startswith("https://"):
+    # Force the https:// protocol if it was accidentally omitted
+    if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"https://{url}"
         
     return create_client(url, key)
 
 supabase = init_supabase()
-
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
 class SecurityVault:
@@ -406,7 +405,7 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 run_button = st.sidebar.button("Execute Pipeline", width="stretch")
 
 
-# --- 6. EXECUTION ENGINE FOR QUANTITATIVE PIPELINE (MOVED UP) ---
+# --- 6. EXECUTION ENGINE FOR QUANTITATIVE PIPELINE ---
 if run_button:
     tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
 
@@ -450,8 +449,6 @@ if run_button:
                     "metrics": metrics,
                     "equity_curve": equity_curve
                 }
-        # We don't need the success message outside the tab anymore, 
-        # the tab itself will populate successfully now.
 
 
 # --- 7. MAIN APPLICATION HEADER ---
@@ -727,7 +724,6 @@ with tab4:
     else:
         res = st.session_state.quant_results
         
-        # Adding a success message right at the top of the tab
         st.success("Pipeline executed successfully! Results loaded.")
 
         # 1. Risk Status Section
