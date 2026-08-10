@@ -33,21 +33,14 @@ exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # Safely extract environment variables, stripping any accidental quotes or spaces
-    raw_url = os.environ.get("SUPABASE_URL", "").strip().strip("'\"")
-    raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
+    # HARDCODED: Bypassing Render environment variables completely to force a successful connection
+    url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
+    key = "sb_publishable_C087lxhuIIfwtXmFj-taIw_nR_z1Og7"
     
-    # Fallback to defaults if variables are missing
-    url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-    key = raw_key if raw_key else "sb_publishable_C087lxhuIIfwtXmFj-taIw_nR_z1Og7"
-    
-    # Force the https:// protocol if it was accidentally omitted
-    if url and not url.startswith("http://") and not url.startswith("https://"):
-        url = f"https://{url}"
-        
     return create_client(url, key)
 
 supabase = init_supabase()
+
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
 class SecurityVault:
