@@ -645,8 +645,8 @@ elif selected_page == "Practice Wallet":
     col_trade, col_port = st.columns([1, 2])
     with col_trade:
         st.markdown("##### Execute Trade")
-        with st.form("trade_form"):
-            trade_ticker = st.text_input("Ticker Symbol")
+        with st.form("practice_trade_form_v2"):
+           trade_ticker = st.text_input("Ticker Symbol")
             trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
             trade_qty = st.number_input("Quantity", min_value=1, step=1)
             trade_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
