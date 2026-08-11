@@ -27,7 +27,7 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
     
-    # NEW: Trade Journal Log Table
+    # Trade Journal Log Table
     c.execute('''CREATE TABLE IF NOT EXISTS trade_journal (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     user_id INTEGER, 
@@ -39,7 +39,7 @@ def init_db():
                     total_value REAL
                 )''')
                 
-    # NEW: Price Alerts Table
+    # Price Alerts Table
     c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     user_id INTEGER, 
@@ -64,7 +64,6 @@ def get_or_create_default_user():
         user = (1, 'quant@institutional.terminal')
     return {"id": user[0], "email": user[1]}
 # =====================================================================
-
 
 # Page Configuration
 st.set_page_config(
@@ -167,7 +166,7 @@ with st.sidebar:
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Practice Wallet & Journal"],
         icons=["robot", "globe", "activity", "search", "wallet2"],
-        default_index=4,
+        default_index=3,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -262,7 +261,6 @@ elif selected_page == "Live Market Feed":
             c2.metric("Last Price", f"₹{quote['Last (₹)']}")
             c3.metric("Daily Change", f"{quote['Change (%)']}%")
             
-            # Feature 2: Price Alert Creator UI
             with st.expander("🔔 Set Target Price Alert"):
                 with st.form("alert_form"):
                     target_p = st.number_input("Target Price (₹)", value=float(quote['Last (₹)']))
@@ -276,7 +274,6 @@ elif selected_page == "Live Market Feed":
 
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
-    # Feature 2 & 4: Active Alerts Panel & Watchlists
     col_w_left, col_w_right = st.columns(2)
     with col_w_left:
         st.markdown("##### 📋 Watchlist Manager")
@@ -314,11 +311,9 @@ elif selected_page == "Screener & Diagnostics":
         with st.spinner(f"Rendering Professional Charts for {target_symbol}..."):
             try:
                 ticker_obj = yf.Ticker(yf_target)
-                # Pull 6 months of data to ensure smooth moving averages
                 hist = ticker_obj.history(period="6mo")
                 
                 if not hist.empty:
-                    # Calculate Technicals
                     hist['EMA20'] = hist['Close'].ewm(span=20).mean()
                     hist['EMA50'] = hist['Close'].ewm(span=50).mean()
                     
@@ -337,7 +332,6 @@ elif selected_page == "Screener & Diagnostics":
                     last_rsi = hist['RSI'].iloc[-1]
                     trend_signal = "🟢 BULLISH" if hist['EMA20'].iloc[-1] > hist['EMA50'].iloc[-1] else "🔴 BEARISH"
                     
-                    # Top Metrics Matrix
                     st.markdown("##### Technical Diagnostics Matrix")
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Current Price", f"₹{round(last_price, 2)}")
@@ -346,30 +340,23 @@ elif selected_page == "Screener & Diagnostics":
                     
                     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
                     
-                    # --- PLOTLY PROFESSIONAL CHARTING ---
-                    # Create a 2-row subplot (Price on top, Volume on bottom)
                     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
                                         vertical_spacing=0.03, row_heights=[0.75, 0.25])
                     
-                    # 1. Candlestick Chart
                     fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'],
                                                  low=hist['Low'], close=hist['Close'], name='Price'), 
                                   row=1, col=1)
                     
-                    # 2. Moving Averages
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA20'], line=dict(color='#00E676', width=1.5), name='EMA 20'), row=1, col=1)
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA50'], line=dict(color='#FF1744', width=1.5), name='EMA 50'), row=1, col=1)
                     
-                    # 3. Bollinger Bands (With Shaded Area)
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Upper'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), name='Upper BB'), row=1, col=1)
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Lower'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), 
                                              fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)', name='Lower BB'), row=1, col=1)
                     
-                    # 4. Volume Bars (Red/Green based on close vs open)
                     colors = ['#00E676' if row['Close'] >= row['Open'] else '#FF1744' for _, row in hist.iterrows()]
                     fig.add_trace(go.Bar(x=hist.index, y=hist['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
                     
-                    # Polish the Layout (Dark Mode, TradingView Style)
                     fig.update_layout(
                         template='plotly_dark',
                         paper_bgcolor='rgba(0,0,0,0)',
@@ -385,7 +372,6 @@ elif selected_page == "Screener & Diagnostics":
                     fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor='#1E1E1E')
                     fig.update_xaxes(gridcolor='#1E1E1E')
 
-                    # Render it directly into the Streamlit app
                     st.plotly_chart(fig, use_container_width=True)
 
                 else: 
@@ -393,8 +379,7 @@ elif selected_page == "Screener & Diagnostics":
             except Exception as e: 
                 st.error(f"Error rendering charts: {e}")
 
-                   
- elif selected_page == "Practice Wallet & Journal":
+elif selected_page == "Practice Wallet & Journal":
     user_id = st.session_state.user['id']
 
     def get_wallet():
@@ -415,7 +400,6 @@ elif selected_page == "Screener & Diagnostics":
     balance = get_wallet()
     holdings = get_holdings()
 
-    # Feature 1: Advanced Portfolio Risk Analytics (Sharpe, Portfolio Value, Unrealized P&L)
     total_holdings_val = 0
     portfolio_pnl = 0
     import yfinance as yf
@@ -427,7 +411,7 @@ elif selected_page == "Screener & Diagnostics":
         except: pass
 
     net_worth = balance + total_holdings_val
-    sharpe_ratio = round(1.42 + (portfolio_pnl / 100000), 2)  # Calculated algorithmic risk ratio proxy
+    sharpe_ratio = round(1.42 + (portfolio_pnl / 100000), 2)  
 
     st.markdown(
         f"""
@@ -475,7 +459,6 @@ elif selected_page == "Screener & Diagnostics":
                                 else:
                                     c.execute("INSERT INTO practice_holdings (user_id, ticker, quantity, avg_price) VALUES (?, ?, ?, ?)", (user_id, t_ticker, t_qty, price))
                                 
-                                # Feature 3: Log to Trade Journal
                                 c.execute("INSERT INTO trade_journal (user_id, timestamp, ticker, action, quantity, price, total_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
                                           (user_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t_ticker, "BUY", t_qty, price, cost))
                                 db_conn.commit()
@@ -510,7 +493,6 @@ elif selected_page == "Screener & Diagnostics":
                 pdata.append({"Ticker": h['ticker'], "Qty": h['quantity'], "Avg Buy": round(h['avg_price'], 2), "Live": round(lp, 2), "P&L (₹)": round((lp - h['avg_price'])*h['quantity'], 2)})
             st.dataframe(pd.DataFrame(pdata), width="stretch", hide_index=True)
 
-    # Feature 3: Permanent Trade Journal Log History
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     st.markdown("##### 📜 Permanent Trade Journal & Execution Log", unsafe_allow_html=True)
     c = db_conn.cursor()
