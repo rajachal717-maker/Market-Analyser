@@ -35,19 +35,16 @@ exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
-    raw_url = os.environ.get("SUPABASE_URL", "").strip().strip("'\"")
-    raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
+    # Completely ignoring Streamlit Cloud secrets to force the correct key
+    url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
     
-    url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-    key = raw_key if raw_key else "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
+    # PASTE YOUR REAL ANON KEY HERE (keep the quotes!)
+    key = "eyJhb... PASTE_YOUR_FULL_KEY_HERE ..." 
     
-    
-    if url and not url.startswith("http://") and not url.startswith("https://"):
-        url = f"https://{url}"
-        
     return create_client(url, key)
 
 supabase = init_supabase()
+
 
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
