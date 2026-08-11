@@ -3,33 +3,37 @@ import io
 import secrets
 import time
 import asyncio
+import sqlite3
+import hashlib
 from datetime import datetime, timedelta
 
 import pandas as pd
 import numpy as np
 import streamlit as st
 from streamlit_option_menu import option_menu
-from supabase import Client, create_client
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import pybreaker
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 # =====================================================================
-# 🛑 🛑 1. SUPABASE CONFIGURATION - PASTE EXACT CREDENTIALS HERE 🛑 🛑
+# 🚀 1. LOCAL SQLITE DATABASE SETUP (NO API KEYS REQUIRED!) 🚀
 # =====================================================================
-# Go to Supabase Dashboard -> Settings -> API
-# Copy the URL and the 'anon'/'public' key from the EXACT SAME PAGE.
-# Do not remove the quotation marks!
+def init_db():
+    # This automatically creates a 'market_data.db' file on your computer
+    conn = sqlite3.connect("market_data.db", check_same_thread=False)
+    c = conn.cursor()
+    # Create tables if they don't exist
+    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
+    conn.commit()
+    return conn
 
-SUPABASE_URL_EXACT = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-SUPABASE_KEY_EXACT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
-@st.cache_resource
-def init_supabase() -> Client:
-    # We are forcing the app to use these exact strings to prevent Cloud Secret bugs.
-    return create_client(SUPABASE_URL_EXACT, SUPABASE_KEY_EXACT)
+db_conn = init_db()
 
-supabase = init_supabase()
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
 # =====================================================================
 
 
@@ -118,7 +122,7 @@ div[data-testid="metric-container"] {
 </style>
 """
 
-# --- 3. AUTHENTICATION GATEKEEPER ---
+# --- 3. AUTHENTICATION GATEKEEPER (LOCAL SQLITE) ---
 if "user" not in st.session_state:
     st.session_state.user = None
 
@@ -139,16 +143,16 @@ if not st.session_state.user:
             login_btn = st.form_submit_button("Continue", width="stretch")
 
             if login_btn:
-                try:
-                    response = supabase.auth.sign_in_with_password({
-                        "email": login_email,
-                        "password": login_password,
-                    })
-                    st.session_state.user = response.user
-                    st.success("Authentication successful! Initializing Crypto Vault...")
+                c = db_conn.cursor()
+                c.execute("SELECT id, email FROM users WHERE email = ? AND password = ?", (login_email, hash_password(login_password)))
+                user = c.fetchone()
+                if user:
+                    st.session_state.user = {"id": user[0], "email": user[1]}
+                    st.success("Authentication successful! Initializing...")
+                    time.sleep(1)
                     st.rerun()
-                except Exception as e:
-                    st.error(f"Login failed: {str(e)}")
+                else:
+                    st.error("Invalid email or password.")
 
     with auth_tab2:
         with st.form("signup_form"):
@@ -158,14 +162,16 @@ if not st.session_state.user:
             signup_btn = st.form_submit_button("Create Account", width="stretch")
 
             if signup_btn:
-                try:
-                    response = supabase.auth.sign_up({
-                        "email": signup_email,
-                        "password": signup_password,
-                    })
-                    st.success("Account registered! Please check your email inbox to verify.")
-                except Exception as e:
-                    st.error(f"Registration failed: {str(e)}")
+                if not signup_email or not signup_password:
+                    st.error("Please fill in all fields.")
+                else:
+                    c = db_conn.cursor()
+                    try:
+                        c.execute("INSERT INTO users (email, password) VALUES (?, ?)", (signup_email, hash_password(signup_password)))
+                        db_conn.commit()
+                        st.success("Account registered! You can now sign in.")
+                    except sqlite3.IntegrityError:
+                        st.error("An account with this email already exists.")
 
     st.stop()
 
@@ -182,12 +188,7 @@ if "bse_watchlist" not in st.session_state:
 
 # --- 4. SIDEBAR NAVIGATION & CONFIGURATION ---
 with st.sidebar:
-    
-    # Safely extract user email 
-    if isinstance(st.session_state.user, dict):
-        user_email = st.session_state.user.get("email", "Active User")
-    else:
-        user_email = getattr(st.session_state.user, "email", "Active User")
+    user_email = st.session_state.user.get("email", "Active User")
 
     st.markdown(
         f"""
@@ -216,7 +217,6 @@ with st.sidebar:
     st.markdown("<hr style='border-color: #1A1A1A; margin: 24px 0;'>", unsafe_allow_html=True)
     
     if st.button("Sign Out", width="stretch"):
-        supabase.auth.sign_out()
         st.session_state.user = None
         st.session_state.pop("vault_key", None)
         st.rerun()
@@ -234,7 +234,7 @@ with col_h2:
                 🔒 AES-256 SECURED
             </span>
             <span style='background-color: rgba(0, 230, 118, 0.1); color: #00E676; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(0, 230, 118, 0.2);'>
-                ● ONLINE
+                ● ONLINE (LOCAL DB)
             </span>
         </div>
         """,
@@ -393,29 +393,26 @@ elif selected_page == "Screener & Diagnostics":
 
 elif selected_page == "Practice Wallet":
     
-    if isinstance(st.session_state.user, dict):
-        user_id = st.session_state.user.get("id")
-    else:
-        user_id = getattr(st.session_state.user, "id", None)
+    user_id = st.session_state.user.get("id")
 
     def get_wallet_balance():
-        if not user_id: return 0.0
-        try:
-            res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
-            if not res.data:
-                supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
-                return 1000000.00
-            return float(res.data[0]["balance"])
-        except Exception as e:
-            st.error(f"Supabase error fetching wallet: {e}")
-            return 0.0
+        c = db_conn.cursor()
+        c.execute("SELECT balance FROM practice_wallets WHERE user_id = ?", (user_id,))
+        row = c.fetchone()
+        if not row:
+            c.execute("INSERT INTO practice_wallets (user_id, balance) VALUES (?, ?)", (user_id, 1000000.00))
+            db_conn.commit()
+            return 1000000.00
+        return float(row[0])
 
     def get_holdings():
-        if not user_id: return []
-        try:
-            res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
-            return res.data
-        except: return []
+        c = db_conn.cursor()
+        c.execute("SELECT id, ticker, quantity, avg_price FROM practice_holdings WHERE user_id = ?", (user_id,))
+        rows = c.fetchall()
+        holdings = []
+        for r in rows:
+            holdings.append({"id": r[0], "ticker": r[1], "quantity": r[2], "avg_price": r[3]})
+        return holdings
             
     def fetch_live_price_for_wallet(symbol, exchange):
         import yfinance as yf
@@ -439,7 +436,7 @@ elif selected_page == "Practice Wallet":
     col_trade, col_port = st.columns([1, 2])
     with col_trade:
         st.markdown("##### Execute Trade")
-        with st.form("practice_trade_form_v3"):
+        with st.form("practice_trade_form_local"):
             trade_ticker = st.text_input("Ticker Symbol")
             trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
             trade_qty = st.number_input("Quantity", min_value=1, step=1)
@@ -453,33 +450,47 @@ elif selected_page == "Practice Wallet":
                     else:
                         total_cost = float(price) * trade_qty
                         ticker_db = trade_ticker.upper()
+                        c = db_conn.cursor()
+                        
                         if trade_action == "BUY":
                             if balance >= total_cost:
-                                supabase.table("practice_wallets").update({"balance": balance - total_cost}).eq("user_id", user_id).execute()
+                                # Update wallet
+                                c.execute("UPDATE practice_wallets SET balance = ? WHERE user_id = ?", (balance - total_cost, user_id))
+                                
+                                # Check existing holding
                                 existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
                                 if existing:
                                     new_qty = existing["quantity"] + trade_qty
                                     new_avg = ((existing["quantity"] * float(existing["avg_price"])) + total_cost) / new_qty
-                                    supabase.table("practice_holdings").update({"quantity": new_qty, "avg_price": new_avg}).eq("id", existing["id"]).execute()
+                                    c.execute("UPDATE practice_holdings SET quantity = ?, avg_price = ? WHERE id = ?", (new_qty, new_avg, existing["id"]))
                                 else: 
-                                    supabase.table("practice_holdings").insert({"user_id": user_id, "ticker": ticker_db, "quantity": trade_qty, "avg_price": price}).execute()
+                                    c.execute("INSERT INTO practice_holdings (user_id, ticker, quantity, avg_price) VALUES (?, ?, ?, ?)", (user_id, ticker_db, trade_qty, price))
+                                
+                                db_conn.commit()
                                 st.success(f"Bought {trade_qty} {ticker_db}!")
                                 time.sleep(1)
                                 st.rerun()
-                            else: st.error("Insufficient Funds.")
+                            else: 
+                                st.error("Insufficient Funds.")
+                                
                         elif trade_action == "SELL":
                             existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
                             if existing and existing["quantity"] >= trade_qty:
-                                supabase.table("practice_wallets").update({"balance": balance + total_cost}).eq("user_id", user_id).execute()
+                                # Update wallet
+                                c.execute("UPDATE practice_wallets SET balance = ? WHERE user_id = ?", (balance + total_cost, user_id))
+                                
                                 new_qty = existing["quantity"] - trade_qty
                                 if new_qty == 0: 
-                                    supabase.table("practice_holdings").delete().eq("id", existing["id"]).execute()
+                                    c.execute("DELETE FROM practice_holdings WHERE id = ?", (existing["id"],))
                                 else: 
-                                    supabase.table("practice_holdings").update({"quantity": new_qty}).eq("id", existing["id"]).execute()
+                                    c.execute("UPDATE practice_holdings SET quantity = ? WHERE id = ?", (new_qty, existing["id"]))
+                                
+                                db_conn.commit()
                                 st.success(f"Sold {trade_qty} {ticker_db}!")
                                 time.sleep(1)
                                 st.rerun()
-                            else: st.error("Not enough shares to sell.")
+                            else: 
+                                st.error("Not enough shares to sell.")
 
     with col_port:
         st.markdown("##### Current Holdings")
