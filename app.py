@@ -34,16 +34,17 @@ exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
-def init_supabase() -> Client:
-    # Completely ignoring Streamlit Cloud secrets to force the correct key
+try: 
+  def init_supabase() -> Client:
     url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
     
-    # PASTE YOUR REAL ANON KEY HERE (keep the quotes!)
-    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg" 
+    # YOUR KEY GOES RIGHT HERE:
+    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
     
     return create_client(url, key)
 
 supabase = init_supabase()
+
 
 
 
