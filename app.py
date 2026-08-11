@@ -699,15 +699,14 @@ elif selected_page == "Practice Wallet":
 
  # --- TRADE EXECUTION PANEL ---
     with col_trade:
-        st.markdown("<h5 style='font-size: 14px;'>Execute Trade</h5>", unsafe_allow_html=True)
-        with st.form("trade_form"):
-            trade_ticker = st.text_input("Ticker Symbol", placeholder="e.g. RELIANCE, TCS")
+        st.markdown("##### Execute Trade")
+        with st.form("practice_trade_form_v2"):
+            trade_ticker = st.text_input("Ticker Symbol")
             trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
             trade_qty = st.number_input("Quantity", min_value=1, step=1)
             trade_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
-            submit_trade = st.form_submit_button("Submit Order", width="stretch")
-            
-            if submit_trade and trade_ticker:
+              
+             if submit_trade and trade_ticker:
                 with st.spinner("Executing..."):
                     quote = get_yf_quote(trade_ticker, trade_exchange)
                     if quote["Last (₹)"] == "N/A":
