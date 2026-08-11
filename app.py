@@ -32,19 +32,22 @@ st.set_page_config(
 # --- CIRCUIT BREAKER CONFIGURATION ---
 exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
-
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # Hardcoding to bypass Streamlit Cloud bugs
-    url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-    key = "eyJhb... PASTE YOUR REAL ANON KEY HERE ... "
+    raw_url = os.environ.get("SUPABASE_URL", "").strip().strip("'\"")
+    raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
     
+    url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
+    # Fallback key logic - if Render/Streamlit fails to load the ENV var, it uses this
+    key = raw_key if raw_key else "PASTE_YOUR_REAL_SUPABASE_ANON_KEY_HERE"
+    
+    if url and not url.startswith("http://") and not url.startswith("https://"):
+        url = f"https://{url}"
+        
     return create_client(url, key)
 
 supabase = init_supabase()
-
-
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
 class SecurityVault:
@@ -178,35 +181,54 @@ if not st.session_state.user:
 
     with auth_tab1:
         with st.form("login_form"):
-            # Added autocomplete="email"
             login_email = st.text_input("Email", autocomplete="email")
-            # Added autocomplete="current-password"
             login_password = st.text_input("Password", type="password", autocomplete="current-password")
             st.markdown("")
             login_btn = st.form_submit_button("Continue", width="stretch")
 
-            # ... (keep the rest of the login logic the same) ...
+            if login_btn:
+                try:
+                    response = supabase.auth.sign_in_with_password({
+                        "email": login_email,
+                        "password": login_password,
+                    })
+                    st.session_state.user = response.user
+                    st.success("Authentication successful! Initializing Crypto Vault...")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Login failed: {e}")
 
     with auth_tab2:
         with st.form("signup_form"):
-            # Added autocomplete="email"
             signup_email = st.text_input("Email", autocomplete="email")
-            # Added autocomplete="new-password" so browsers offer to generate a strong password
             signup_password = st.text_input("Password", type="password", autocomplete="new-password")
             st.markdown("")
             signup_btn = st.form_submit_button("Create Account", width="stretch")
-            
-        
-    
+
+            if signup_btn:
+                try:
+                    response = supabase.auth.sign_up({
+                        "email": signup_email,
+                        "password": signup_password,
+                    })
+                    st.success("Account registered! Please check your email inbox to verify.")
+                except Exception as e:
+                    st.error(f"Registration failed: {e}")
+
+    st.stop()
 
 # =====================================================================
 # MAIN APPLICATION
 # =====================================================================
 st.markdown(THEME_CSS, unsafe_allow_html=True)
 
-from strategy import RebalancingStrategy
-from backtester import run_backtest
-from risk_manager import check_portfolio_risk
+try:
+    from strategy import RebalancingStrategy
+    from backtester import run_backtest
+    from risk_manager import check_portfolio_risk
+except ImportError:
+    pass # In case local modules are missing during test deploys
+
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -300,7 +322,7 @@ def calculate_rsi(series, period=14):
 # --- 5. SIDEBAR NAVIGATION & CONFIGURATION ---
 with st.sidebar:
     
-    # Safely extract the email whether it's a Supabase object or a Python dictionary
+    # Safely extract user email 
     if isinstance(st.session_state.user, dict):
         user_email = st.session_state.user.get("email", "Active User")
     else:
@@ -315,7 +337,6 @@ with st.sidebar:
         """,
         unsafe_allow_html=True
     )
-
     
     # -- SAAS MENU ROUTING --
     selected_page = option_menu(
@@ -375,19 +396,21 @@ if run_button:
                 if df_prices.empty:
                     st.error(f"Pipeline failed for: {tickers}")
                 else:
-                    method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
-                    strategy = RebalancingStrategy(df_prices.columns.tolist(), df_prices=df_prices, method=method_mapping)
-                    target_weights = strategy.calculate_weights()
-                    safe_weights, risk_status, current_dd = check_portfolio_risk(df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0)
-                    metrics, equity_curve = run_backtest(df_prices, safe_weights)
+                    try:
+                        method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
+                        strategy = RebalancingStrategy(df_prices.columns.tolist(), df_prices=df_prices, method=method_mapping)
+                        target_weights = strategy.calculate_weights()
+                        safe_weights, risk_status, current_dd = check_portfolio_risk(df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0)
+                        metrics, equity_curve = run_backtest(df_prices, safe_weights)
 
-                    st.session_state.quant_results = {
-                        "df_prices": df_prices, "safe_weights": safe_weights, 
-                        "risk_status": risk_status, "current_dd": current_dd, 
-                        "metrics": metrics, "equity_curve": equity_curve
-                    }
-                    st.success("Success! Check Portfolio Suite.")
-
+                        st.session_state.quant_results = {
+                            "df_prices": df_prices, "safe_weights": safe_weights, 
+                            "risk_status": risk_status, "current_dd": current_dd, 
+                            "metrics": metrics, "equity_curve": equity_curve
+                        }
+                        st.success("Success! Check Portfolio Suite.")
+                    except Exception as e:
+                        st.error(f"Backtest error: {e}")
 
 # --- 7. MAIN APPLICATION HEADER ---
 col_h1, col_h2 = st.columns([3, 2])
@@ -587,7 +610,6 @@ elif selected_page == "Screener & Diagnostics":
                 else: st.error("Could not retrieve price action.")
             except Exception as e: st.error(f"Error: {e}")
 
-
 elif selected_page == "Practice Wallet":
     
     # 1. Safely extract ID with fallback
@@ -620,9 +642,7 @@ elif selected_page == "Practice Wallet":
         except Exception as e:
             st.error(f"Holdings Error: {str(e)}")
             return []
-
-    # ... keep the rest of the Practice Wallet UI the same ...
-        
+            
     def fetch_live_price_for_wallet(symbol, exchange):
         import yfinance as yf
         yf_ticker = f"{symbol}.NS" if exchange == "NSE" else f"{symbol}.BO"
@@ -646,10 +666,11 @@ elif selected_page == "Practice Wallet":
     with col_trade:
         st.markdown("##### Execute Trade")
         with st.form("practice_trade_form_v2"):
-           trade_ticker = st.text_input("Ticker Symbol")
+            trade_ticker = st.text_input("Ticker Symbol")
             trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
             trade_qty = st.number_input("Quantity", min_value=1, step=1)
             trade_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
+            
             if st.form_submit_button("Submit Order", width="stretch") and trade_ticker:
                 with st.spinner("Executing..."):
                     price = fetch_live_price_for_wallet(trade_ticker.upper(), trade_exchange)
@@ -696,90 +717,3 @@ elif selected_page == "Practice Wallet":
                     "Live Price": round(live_price, 2), "P&L (₹)": round(current_val - invested, 2)
                 })
             st.dataframe(pd.DataFrame(portfolio_data), width="stretch", hide_index=True)
-
- # --- TRADE EXECUTION PANEL ---
-    with col_trade:
-        st.markdown("##### Execute Trade")
-        with st.form("practice_trade_form_v2"):
-            trade_ticker = st.text_input("Ticker Symbol")
-            trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
-            trade_qty = st.number_input("Quantity", min_value=1, step=1)
-            trade_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
-              
-             if submit_trade and trade_ticker:
-                with st.spinner("Executing..."):
-                    quote = get_yf_quote(trade_ticker, trade_exchange)
-                    if quote["Last (₹)"] == "N/A":
-                        st.error("Invalid Ticker.")
-                    else:
-                        price = float(quote["Last (₹)"])
-                        total_cost = price * trade_qty
-                        ticker_db = quote['Symbol']
-                        
-                        if trade_action == "BUY":
-                            if balance >= total_cost:
-                                # Deduct Balance
-                                new_balance = balance - total_cost
-                                supabase.table("practice_wallets").update({"balance": new_balance}).eq("user_id", user_id).execute()
-                                
-                                # Update Holdings
-                                existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
-                                if existing:
-                                    new_qty = existing["quantity"] + trade_qty
-                                    new_avg = ((existing["quantity"] * float(existing["avg_price"])) + total_cost) / new_qty
-                                    supabase.table("practice_holdings").update({"quantity": new_qty, "avg_price": new_avg}).eq("id", existing["id"]).execute()
-                                else:
-                                    supabase.table("practice_holdings").insert({"user_id": user_id, "ticker": ticker_db, "quantity": trade_qty, "avg_price": price}).execute()
-                                st.success(f"Bought {trade_qty} shares of {ticker_db}!")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("Insufficient Funds.")
-                                
-                        elif trade_action == "SELL":
-                            existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
-                            if existing and existing["quantity"] >= trade_qty:
-                                # Add Balance
-                                new_balance = balance + total_cost
-                                supabase.table("practice_wallets").update({"balance": new_balance}).eq("user_id", user_id).execute()
-                                
-                                # Update Holdings
-                                new_qty = existing["quantity"] - trade_qty
-                                if new_qty == 0:
-                                    supabase.table("practice_holdings").delete().eq("id", existing["id"]).execute()
-                                else:
-                                    supabase.table("practice_holdings").update({"quantity": new_qty}).eq("id", existing["id"]).execute()
-                                st.success(f"Sold {trade_qty} shares of {ticker_db}!")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("You do not own enough shares to sell.")
-
-    # --- PORTFOLIO PANEL ---
-    with col_port:
-        st.markdown("<h5 style='font-size: 14px;'>Current Holdings</h5>", unsafe_allow_html=True)
-        if not holdings:
-            st.info("Your portfolio is currently empty. Execute a buy order to start practicing.")
-        else:
-            portfolio_data = []
-            for h in holdings:
-                # Fetch live price for P&L calculation
-                live_q = get_yf_quote(h["ticker"], "NSE") # Defaulting lookup to NSE for portfolio valuation
-                live_price = float(live_q["Last (₹)"]) if live_q["Last (₹)"] != "N/A" else float(h["avg_price"])
-                
-                invested = h["quantity"] * float(h["avg_price"])
-                current_val = h["quantity"] * live_price
-                pnl = current_val - invested
-                pnl_pct = (pnl / invested) * 100 if invested > 0 else 0
-                
-                portfolio_data.append({
-                    "Asset": h["ticker"],
-                    "Qty": h["quantity"],
-                    "Avg Buy (₹)": round(float(h["avg_price"]), 2),
-                    "Live Price (₹)": round(live_price, 2),
-                    "P&L (₹)": round(pnl, 2),
-                    "P&L (%)": f"{round(pnl_pct, 2)}%"
-                })
-            
-            df_portfolio = pd.DataFrame(portfolio_data)
-            st.dataframe(df_portfolio, width="stretch", hide_index=True)
