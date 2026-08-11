@@ -189,37 +189,69 @@ if "bse_watchlist" not in st.session_state:
 # --- 4. SIDEBAR NAVIGATION & CONFIGURATION ---
 with st.sidebar:
     user_email = st.session_state.user.get("email", "Active User")
+    user_initial = user_email[0].upper() if user_email else "U"
 
+    # Sleek User Profile Card with Avatar
     st.markdown(
         f"""
-        <div style="background-color: #121212; padding: 16px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
-            <div style="font-size: 11px; color: #9AA0A6; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Session</div>
-            <div style="font-size: 13px; color: #FFFFFF; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{user_email}</div>
+        <div style="display: flex; align-items: center; padding: 12px 16px; background-color: #121212; border-radius: 12px; border: 1px solid #1E1E1E; margin-bottom: 24px;">
+            <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #2962FF; display: flex; justify-content: center; align-items: center; color: white; font-weight: 700; font-size: 16px; margin-right: 12px;">
+                {user_initial}
+            </div>
+            <div style="overflow: hidden;">
+                <div style="font-size: 11px; color: #9AA0A6; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Logged In</div>
+                <div style="font-size: 13px; color: #FFFFFF; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">{user_email}</div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True
     )
     
+    # Modernized Navigation Menu
     selected_page = option_menu(
-        menu_title="Main Menu",
+        menu_title=None,  # Hiding the title makes it look cleaner
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Practice Wallet"],
         icons=["robot", "globe", "activity", "search", "wallet2"],
         menu_icon="cast",
-        default_index=0,
+        default_index=3, # Defaults to Screener based on your screenshot
         styles={
-            "container": {"padding": "0!important", "background-color": "transparent"},
-            "icon": {"color": "#2962FF", "font-size": "16px"},
-            "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px", "--hover-color": "#1A1A1A", "color": "#9AA0A6"},
-            "nav-link-selected": {"background-color": "#121212", "color": "#00E676", "border-left": "3px solid #2962FF"},
+            "container": {
+                "padding": "0!important", 
+                "background-color": "transparent",
+                "border": "none"
+            },
+            "icon": {
+                "color": "#9AA0A6", 
+                "font-size": "18px"
+            },
+            "nav-link": {
+                "font-size": "14px", 
+                "text-align": "left", 
+                "margin": "4px 0px", 
+                "--hover-color": "#1A1A1A", 
+                "color": "#9AA0A6",
+                "border-radius": "8px",
+                "padding": "12px 16px",
+                "font-weight": "500"
+            },
+            "nav-link-selected": {
+                "background-color": "rgba(41, 98, 255, 0.15)", 
+                "color": "#2962FF", 
+                "font-weight": "600",
+                "border-radius": "8px"
+            },
         }
     )
 
-    st.markdown("<hr style='border-color: #1A1A1A; margin: 24px 0;'>", unsafe_allow_html=True)
+    st.markdown("<div style='height: 40px;'></div>", unsafe_allow_html=True) # Adds breathing room before Sign Out
     
     if st.button("Sign Out", width="stretch"):
         st.session_state.user = None
         st.session_state.pop("vault_key", None)
         st.rerun()
+
+   
+   
 
 # --- 5. MAIN APPLICATION HEADER ---
 col_h1, col_h2 = st.columns([3, 2])
@@ -386,7 +418,7 @@ elif selected_page == "Screener & Diagnostics":
                     m1.metric("Current Price", f"₹{round(last_price, 2)}")
                     m2.metric("Trend Signal", trend_signal)
                     
-                    st.markdown("<br>##### Price Action & Moving Averages (20 vs 50 EMA)", unsafe_allow_html=True)
+                    st.markdown("<br>\n\n##### Price Action & Moving Averages (20 vs 50 EMA)", unsafe_allow_html=True)
                     st.line_chart(hist[['Close', 'EMA20', 'EMA50']])
                 else: st.error("Could not retrieve price action. Ensure ticker is correct.")
             except Exception as e: st.error(f"Error: {e}")
