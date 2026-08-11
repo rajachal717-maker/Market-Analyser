@@ -5,6 +5,7 @@ import secrets
 import pandas as pd
 import numpy as np
 import streamlit as st
+from streamlit_option_menu import option_menu
 from supabase import Client, create_client
 import time
 import requests
@@ -25,6 +26,7 @@ st.set_page_config(
     page_title="Institutional Quant Terminal",
     page_icon="✨",
     layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # --- CIRCUIT BREAKER CONFIGURATION ---
@@ -33,14 +35,18 @@ exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
-    # HARDCODED: Bypassing Render environment variables completely to force a successful connection
-    url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-    key = "sb_publishable_C087lxhuIIfwtXmFj-taIw_nR_z1Og7"
+    raw_url = os.environ.get("SUPABASE_URL", "").strip().strip("'\"")
+    raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
     
+    url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
+    key = raw_key if raw_key else "sb_publishable_C087lxhuIIfwtXmFj-taIw_nR_z1Og7"
+    
+    if url and not url.startswith("http://") and not url.startswith("https://"):
+        url = f"https://{url}"
+        
     return create_client(url, key)
 
 supabase = init_supabase()
-
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
 class SecurityVault:
@@ -81,7 +87,7 @@ header { background-color: transparent !important; }
     font-size: 13px;
 }
 
-.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea {
+.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea, .stNumberInput>div>div>input {
     background-color: #121212 !important;
     color: #FFFFFF !important;
     border: 1px solid #2B2B2B !important;
@@ -116,27 +122,6 @@ header { background-color: transparent !important; }
 }
 [data-testid="stForm"] .stButton>button:hover {
     background-color: rgba(41, 98, 255, 0.1);
-}
-
-.stTabs [data-baseweb="tab-list"] {
-    background-color: transparent;
-    gap: 24px;
-    border-bottom: 1px solid #1A1A1A;
-}
-.stTabs [data-baseweb="tab"] {
-    background-color: transparent;
-    border: none;
-    color: #9AA0A6;
-    border-radius: 0;
-    border-bottom: 3px solid transparent;
-    padding: 12px 4px;
-    font-weight: 500;
-    font-size: 14px;
-}
-.stTabs [aria-selected="true"] {
-    color: #2962FF !important;
-    background-color: transparent !important;
-    border-bottom: 3px solid #2962FF;
 }
 
 div[data-testid="metric-container"] {
@@ -236,11 +221,9 @@ if not st.session_state.user:
 # =====================================================================
 st.markdown(THEME_CSS, unsafe_allow_html=True)
 
-# --- 4. LOCAL QUANTITATIVE & AI MODULE IMPORTS ---
 from strategy import RebalancingStrategy
 from backtester import run_backtest
 from risk_manager import check_portfolio_risk
-
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -262,7 +245,6 @@ def resolve_ticker_via_search(user_query: str) -> str:
     cleaned = user_query.strip()
     return cleaned.upper()
 
-# --- UPGRADED HYBRID QUANT PIPELINE ---
 def push_to_timescaledb(df, table_name, db_uri):
     try:
         from sqlalchemy import create_engine
@@ -277,10 +259,8 @@ def push_to_timescaledb(df, table_name, db_uri):
 @st.cache_data(ttl=0)
 def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri=None):
     import yfinance as yf
-    
     os.makedirs("market_data", exist_ok=True)
     data = {}
-    
     for ticker in tickers:
         yf_ticker = ticker if ("." in ticker) else f"{ticker}.NS"
         parquet_path = f"market_data/{yf_ticker}_{interval}.parquet.enc"
@@ -289,7 +269,6 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
             try:
                 with open(parquet_path, "rb") as f:
                     encrypted_bytes = f.read()
-                
                 decrypted_bytes = vault.decrypt_data(encrypted_bytes)
                 buf = io.BytesIO(decrypted_bytes)
                 df_ticker = pd.read_parquet(buf, engine='pyarrow')
@@ -306,36 +285,21 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
                 st.warning(f"Encrypted load failed for {ticker}: {e}")
 
         try:
-            stock_data = yf.download(
-                yf_ticker, 
-                start=start_date, 
-                end=end_date, 
-                interval=interval,
-                progress=False, 
-                multi_level_index=False
-            )
-            
+            stock_data = yf.download(yf_ticker, start=start_date, end=end_date, interval=interval, progress=False, multi_level_index=False)
             if not stock_data.empty:
                 if stock_data.index.tz is not None:
                     stock_data.index = stock_data.index.tz_localize(None)
-                    
                 buf = io.BytesIO()
                 stock_data.to_parquet(buf, engine='pyarrow', compression='snappy')
                 encrypted_payload = vault.encrypt_data(buf.getvalue())
-                
                 with open(parquet_path, "wb") as f:
                     f.write(encrypted_payload)
-                    
                 if db_uri:
                     push_to_timescaledb(stock_data, "intraday_prices" if interval != "1d" else "historical_prices", db_uri)
-                    
                 if 'Close' in stock_data.columns:
                     data[ticker] = stock_data['Close']
-            else:
-                st.warning(f"No Close price data found for {yf_ticker}")
-                
-        except Exception as e:
-            st.error(f"yfinance failed for {yf_ticker}: {str(e)}")
+        except Exception:
+            pass
             
     if data:
         df_final = pd.DataFrame(data)
@@ -343,7 +307,6 @@ def fetch_stock_data_hybrid(tickers, start_date, end_date, interval="1d", db_uri
         return df_final
     return pd.DataFrame()
 
-# --- HELPER TECHNICAL CALCULATIONS ---
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -351,104 +314,95 @@ def calculate_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-# --- 5. SIDEBAR CONFIGURATION ---
-st.sidebar.markdown(
-    f"""
-    <div style="background-color: #121212; padding: 16px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
-        <div style="font-size: 11px; color: #9AA0A6; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Session</div>
-        <div style="font-size: 13px; color: #FFFFFF; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{st.session_state.user.email}</div>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+# --- 5. SIDEBAR NAVIGATION & CONFIGURATION ---
+with st.sidebar:
+    st.markdown(
+        f"""
+        <div style="background-color: #121212; padding: 16px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
+            <div style="font-size: 11px; color: #9AA0A6; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Session</div>
+            <div style="font-size: 13px; color: #FFFFFF; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{st.session_state.user.email}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # -- SAAS MENU ROUTING --
+    selected_page = option_menu(
+        menu_title="Main Menu",
+        options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Portfolio & Quant Suite", "Screener & Diagnostics", "Practice Wallet"],
+        icons=["robot", "globe", "activity", "pie-chart", "search", "wallet2"],
+        menu_icon="cast",
+        default_index=0,
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent"},
+            "icon": {"color": "#2962FF", "font-size": "16px"},
+            "nav-link": {"font-size": "14px", "text-align": "left", "margin":"0px", "--hover-color": "#1A1A1A", "color": "#9AA0A6"},
+            "nav-link-selected": {"background-color": "#121212", "color": "#00E676", "border-left": "3px solid #2962FF"},
+        }
+    )
 
-if st.sidebar.button("Sign Out", width="stretch"):
-    supabase.auth.sign_out()
-    st.session_state.user = None
-    st.session_state.pop("vault_key", None)
-    st.rerun()
+    st.markdown("<hr style='border-color: #1A1A1A; margin: 24px 0;'>", unsafe_allow_html=True)
+    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 16px;'>Pipeline Configuration</div>", unsafe_allow_html=True)
 
-st.sidebar.markdown("<br>", unsafe_allow_html=True)
-st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 16px;'>Data Pipeline Setup</div>", unsafe_allow_html=True)
+    data_mode = st.radio("Data Resolution", ["Daily (End of Day)", "Intraday (5-Minute)"])
+    strategy_method = st.selectbox("Optimization Objective", ["Equal-Weight (1/N)", "Max Sharpe Ratio"])
+    
+    if data_mode == "Intraday (5-Minute)":
+        time_period = st.selectbox("Historical Window", ["1 Day", "5 Days", "1 Month", "60 Days"], index=1)
+        days_map = {"1 Day": 1, "5 Days": 5, "1 Month": 30, "60 Days": 60}
+        active_interval = "5m"
+    else:
+        time_period = st.selectbox("Historical Window", ["6mo", "1y", "2y", "5y"])
+        days_map = {"6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
+        active_interval = "1d"
 
-data_mode = st.sidebar.radio("Data Resolution", ["Daily (End of Day)", "Intraday (5-Minute)"])
-db_connection = st.sidebar.text_input("TimescaleDB URI (Optional)", placeholder="postgresql://user:pass@localhost/quantdb", type="password")
+    max_dd_limit = st.slider("Risk Tolerance (Max Drawdown %)", -30, -5, -15)
+    st.markdown("<br>", unsafe_allow_html=True)
+    run_button = st.button("Execute Pipeline", width="stretch")
 
-st.sidebar.markdown("<br>", unsafe_allow_html=True)
-st.sidebar.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 16px;'>Model Parameters</div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("Sign Out", width="stretch"):
+        supabase.auth.sign_out()
+        st.session_state.user = None
+        st.session_state.pop("vault_key", None)
+        st.rerun()
 
-strategy_method = st.sidebar.selectbox(
-    "Optimization Objective", ["Equal-Weight (1/N)", "Max Sharpe Ratio"]
-)
-
-if data_mode == "Intraday (5-Minute)":
-    time_period = st.sidebar.selectbox("Historical Window", ["1 Day", "5 Days", "1 Month", "60 Days"], index=1)
-    days_map = {"1 Day": 1, "5 Days": 5, "1 Month": 30, "60 Days": 60}
-    active_interval = "5m"
-else:
-    time_period = st.sidebar.selectbox("Historical Window", ["6mo", "1y", "2y", "5y"])
-    days_map = {"6mo": 180, "1y": 365, "2y": 730, "5y": 1825}
-    active_interval = "1d"
-
-max_dd_limit = st.sidebar.slider(
-    "Risk Tolerance (Max Drawdown %)", -30, -5, -15
-)
-
-st.sidebar.markdown("<br>", unsafe_allow_html=True)
-run_button = st.sidebar.button("Execute Pipeline", width="stretch")
-
-
-# --- 6. EXECUTION ENGINE FOR QUANTITATIVE PIPELINE ---
+# --- 6. EXECUTION ENGINE ---
 if run_button:
     tickers = [resolve_ticker_via_search(t) for t in st.session_state.nse_watchlist]
-
     if not tickers:
-        st.error("Please supply valid asset ticker symbols.")
+        st.sidebar.error("Please supply valid asset ticker symbols.")
     else:
-        with st.spinner("Compiling quantitative models via Hybrid Pipeline..."):
-            
-            lookback = days_map.get(time_period, 365)
-            start_date = (datetime.today() - timedelta(days=lookback)).strftime("%Y-%m-%d")
-            end_date = datetime.today().strftime("%Y-%m-%d")
+        with st.sidebar:
+            with st.spinner("Compiling models..."):
+                lookback = days_map.get(time_period, 365)
+                start_date = (datetime.today() - timedelta(days=lookback)).strftime("%Y-%m-%d")
+                end_date = datetime.today().strftime("%Y-%m-%d")
 
-            df_prices = fetch_stock_data_hybrid(
-                tickers, 
-                start_date=start_date, 
-                end_date=end_date, 
-                interval=active_interval,
-                db_uri=db_connection if db_connection else None
-            )
+                df_prices = fetch_stock_data_hybrid(tickers, start_date=start_date, end_date=end_date, interval=active_interval)
 
-            if df_prices.empty:
-                st.error(f"Data pipeline failed. Could not retrieve historical data for: {tickers}")
-            else:
-                method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
-                valid_tickers = df_prices.columns.tolist()
-                
-                strategy = RebalancingStrategy(valid_tickers, df_prices=df_prices, method=method_mapping)
-                target_weights = strategy.calculate_weights()
+                if df_prices.empty:
+                    st.error(f"Pipeline failed for: {tickers}")
+                else:
+                    method_mapping = "equal" if "Equal-Weight" in strategy_method else "max_sharpe"
+                    strategy = RebalancingStrategy(df_prices.columns.tolist(), df_prices=df_prices, method=method_mapping)
+                    target_weights = strategy.calculate_weights()
+                    safe_weights, risk_status, current_dd = check_portfolio_risk(df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0)
+                    metrics, equity_curve = run_backtest(df_prices, safe_weights)
 
-                safe_weights, risk_status, current_dd = check_portfolio_risk(
-                    df_prices, target_weights, max_drawdown_limit=max_dd_limit / 100.0
-                )
-
-                metrics, equity_curve = run_backtest(df_prices, safe_weights)
-
-                st.session_state.quant_results = {
-                    "df_prices": df_prices,
-                    "safe_weights": safe_weights,
-                    "risk_status": risk_status,
-                    "current_dd": current_dd,
-                    "metrics": metrics,
-                    "equity_curve": equity_curve
-                }
+                    st.session_state.quant_results = {
+                        "df_prices": df_prices, "safe_weights": safe_weights, 
+                        "risk_status": risk_status, "current_dd": current_dd, 
+                        "metrics": metrics, "equity_curve": equity_curve
+                    }
+                    st.success("Success! Check Portfolio Suite.")
 
 
 # --- 7. MAIN APPLICATION HEADER ---
 col_h1, col_h2 = st.columns([3, 2])
 with col_h1:
     st.markdown("<h2 style='margin-bottom: 4px;'>Institutional Intelligence Terminal</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Advanced Quantitative Strategy Execution & AI Analysis</p>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color: #9AA0A6; font-size: 14px;'>Active Module: <b>{selected_page}</b></p>", unsafe_allow_html=True)
 with col_h2:
     st.markdown(
         """
@@ -463,28 +417,15 @@ with col_h2:
         """,
         unsafe_allow_html=True,
     )
+st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
-st.markdown("<br>", unsafe_allow_html=True)
+# ==========================================
+# MODULE ROUTER (Based on Sidebar Selection)
+# ==========================================
 
-# --- 8. NAVIGATION TABS LAYOUT (Consolidated) ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    [
-        "AI Assistant",
-        "Web Intelligence",
-        "Live Market Feed",
-        "Portfolio & Quant Suite",
-        "Screener & Diagnostics",
-    ]
-)
-
-# --- TAB 1: AI Analyst Console ---
-with tab1:
-    st.markdown("<br>", unsafe_allow_html=True)
+if selected_page == "AI Assistant":
     if "messages" not in st.session_state:
-        st.session_state.messages = [{
-            "role": "assistant",
-            "content": "Hi there. I'm J.A.R.V.I.S., your terminal assistant. How can I help analyze the markets today?",
-        }]
+        st.session_state.messages = [{"role": "assistant", "content": "Hi there. I'm J.A.R.V.I.S., your terminal assistant. How can I help analyze the markets today?"}]
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="✨" if message["role"] == "assistant" else "👤"):
@@ -500,45 +441,26 @@ with tab1:
                 try:
                     api_key = os.environ.get("GROQ_API_KEY")
                     if not api_key:
-                        st.error("GROQ_API_KEY is missing. Please configure it.")
+                        st.error("GROQ_API_KEY is missing.")
                     else:
-                        chat_llm = ChatGroq(
-                            model="llama-3.1-8b-instant",
-                            temperature=0.1,
-                            groq_api_key=api_key,
-                        )
-                        messages = [
-                            SystemMessage(
-                                content="You are J.A.R.V.I.S., an advanced institutional quantitative trading assistant. Provide precise, technical, and data-driven market analysis. Do not include knowledge-cutoff disclaimers, standard AI boilerplate, or financial advice warnings."
-                            ),
-                            HumanMessage(content=prompt),
-                        ]
+                        chat_llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1, groq_api_key=api_key)
+                        messages = [SystemMessage(content="You are J.A.R.V.I.S., an advanced institutional quantitative trading assistant."), HumanMessage(content=prompt)]
                         response_msg = chat_llm.invoke(messages).content
                         st.markdown(response_msg)
                         st.session_state.messages.append({"role": "assistant", "content": response_msg})
                 except Exception as e:
-                    err_msg = f"API connection error: {e}"
-                    st.error(err_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
+                    st.error(f"API connection error: {e}")
 
-# --- TAB 2: Market Intelligence Search ---
-with tab2:
-    st.markdown("<br>", unsafe_allow_html=True)
+elif selected_page == "Web Intelligence":
     col_s1, col_s2 = st.columns([4, 1])
     with col_s1:
-        search_query = st.text_input(
-            "Query",
-            placeholder="Search global macro indicators or sector news...",
-            label_visibility="collapsed",
-        )
+        search_query = st.text_input("Query", placeholder="Search global macro indicators or sector news...", label_visibility="collapsed")
     with col_s2:
         search_btn = st.button("Search Web", width="stretch")
 
-    if search_btn:
-        if not search_query.strip():
-            st.warning("Please enter a valid search string.")
-        elif not search_available:
-            st.error("Search package (`ddgs`) is not installed. Run `pip install ddgs`.")
+    if search_btn and search_query.strip():
+        if not search_available:
+            st.error("Search package (`ddgs`) is not installed.")
         else:
             with st.spinner("Scanning sources..."):
                 try:
@@ -552,275 +474,211 @@ with tab2:
                                     st.write(r.get('body', ''))
                                     st.markdown(f"[Source Link]({r.get('href', '#')})")
                 except Exception as e:
-                    st.error(f"Search execution error: {e}")
+                    st.error(f"Search error: {e}")
 
-# --- TAB 3: Live NSE & BSE Market Feed ---
-with tab3:
-    st.markdown("<br>", unsafe_allow_html=True)
-    
+elif selected_page == "Live Market Feed":
     def get_yf_quote(symbol, exchange):
         import yfinance as yf
-        import requests
-        from bs4 import BeautifulSoup
-        import re
-        
         symbol = symbol.strip().upper()
-        yf_ticker = None
-        
-        if exchange == "NSE":
-            yf_ticker = f"{symbol}.NS"
-        else:
-            try:
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                }
-                search_url = f"https://api.bseindia.com/Msource/1D/getQouteSearch.aspx?Type=EQ&text={symbol}&flag=site"
-                res = requests.get(search_url, headers=headers, timeout=4)
-                
-                if res.status_code == 200:
-                    soup = BeautifulSoup(res.content, "html.parser")
-                    a_tag = soup.find("a")
-                    if a_tag and "href" in a_tag.attrs:
-                        code_match = re.search(r"/(\d+)/", a_tag["href"])
-                        if code_match:
-                            scrip_code = code_match.group(1)
-                            yf_ticker = f"{scrip_code}.BO"
-            except Exception:
-                pass
-                
-            if not yf_ticker:
-                try:
-                    url = f"https://query2.finance.yahoo.com/v1/finance/search?q={symbol}"
-                    res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=3)
-                    if res.status_code == 200:
-                        quotes = res.json().get('quotes', [])
-                        for q in quotes:
-                            if q.get('symbol', '').endswith('.BO'):
-                                yf_ticker = q.get('symbol')
-                                break
-                except Exception:
-                    pass
-            
-            if not yf_ticker:
-                yf_ticker = f"{symbol}.BO"
-
+        yf_ticker = f"{symbol}.NS" if exchange == "NSE" else f"{symbol}.BO"
         try:
             ticker = yf.Ticker(yf_ticker)
-            curr = ticker.fast_info.get('lastPrice')
-            prev = ticker.fast_info.get('previousClose')
-            
+            curr, prev = ticker.fast_info.get('lastPrice'), ticker.fast_info.get('previousClose')
             if curr and prev:
                 change = round(((curr - prev) / prev) * 100, 2)
-                display_sym = yf_ticker.replace('.NS', '').replace('.BO', '')
-                if exchange == "BSE" and display_sym != symbol and display_sym.isdigit():
-                    display_sym = f"{symbol} ({display_sym})"
-                    
-                return {"Symbol": display_sym, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": change}
-        except Exception:
-            pass
-            
+                return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": change}
+        except: pass
         return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
     
     st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>🔍 Quick Quote Search</div>", unsafe_allow_html=True)
-    
     col_sq1, col_sq2, col_sq3 = st.columns([3, 1, 1])
-    with col_sq1:
-        search_ticker = st.text_input("Search Ticker", placeholder="e.g. ZOMATO, ITC, HDFCBANK", label_visibility="collapsed")
-    with col_sq2:
-        search_exchange = st.selectbox("Search Exchange", ["NSE", "BSE"], label_visibility="collapsed")
-    with col_sq3:
-        search_quote_btn = st.button("Get Quote", width="stretch")
+    with col_sq1: search_ticker = st.text_input("Search Ticker", placeholder="e.g. ZOMATO, ITC", label_visibility="collapsed")
+    with col_sq2: search_exchange = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
+    with col_sq3: search_quote_btn = st.button("Get Quote", width="stretch")
 
-    if search_quote_btn:
-        if search_ticker.strip():
-            with st.spinner(f"Resolving quote for {search_ticker.strip().upper()}..."):
-                quote = get_yf_quote(search_ticker, search_exchange)
-                if quote["Last (₹)"] != "N/A":
-                    col_r1, col_r2, col_r3 = st.columns(3)
-                    col_r1.metric("Asset", f"{quote['Symbol']}")
-                    col_r2.metric("Last Price", f"₹{quote['Last (₹)']}")
-                    col_r3.metric("Daily Change", f"{quote['Change (%)']}%")
-                else:
-                    st.error(f"Could not retrieve quote for '{search_ticker.upper()}' on {search_exchange}.")
-        else:
-            st.warning("Please enter a company name or ticker.")
+    if search_quote_btn and search_ticker.strip():
+        with st.spinner("Resolving quote..."):
+            quote = get_yf_quote(search_ticker, search_exchange)
+            if quote["Last (₹)"] != "N/A":
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Asset", quote['Symbol'])
+                c2.metric("Last Price", f"₹{quote['Last (₹)']}")
+                c3.metric("Daily Change", f"{quote['Change (%)']}%")
+            else: st.error("Quote not found.")
 
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
-
     st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>📋 Managed Watchlists</div>", unsafe_allow_html=True)
-    with st.form("watchlist_form", border=False):
-        col_w1, col_w2 = st.columns(2)
-        with col_w1:
-            nse_input = st.text_area("NSE Tickers (comma separated)", value=", ".join(st.session_state.nse_watchlist))
-        with col_w2:
-            bse_input = st.text_area("BSE Symbols (comma separated)", value=", ".join(st.session_state.bse_watchlist))
-        
-        update_watchlist_btn = st.form_submit_button("Update Watchlists")
-
-    if update_watchlist_btn:
-        st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
-        st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
-
-    st.info("💡 Tip: You can type company names into the BSE watchlist. The system will auto-resolve them!")
     
-    col_t1, col_t2 = st.columns(2)
-    placeholder_nse = col_t1.empty()
-    placeholder_bse = col_t2.empty()
+    with st.form("watchlist_form", border=False):
+        c_w1, c_w2 = st.columns(2)
+        with c_w1: nse_input = st.text_area("NSE Tickers (comma separated)", value=", ".join(st.session_state.nse_watchlist))
+        with c_w2: bse_input = st.text_area("BSE Symbols (comma separated)", value=", ".join(st.session_state.bse_watchlist))
+        if st.form_submit_button("Update Watchlists"):
+            st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
+            st.session_state.bse_watchlist = [t.strip().upper() for t in bse_input.split(",") if t.strip()]
 
-    async def fetch_live_async(symbol, exchange):
-        return await asyncio.to_thread(get_yf_quote, symbol, exchange)
-
-    @exchange_breaker
-    def execute_exchange_fetch(nse_tuple, bse_tuple):
-        async def fetch_all():
-            nse_tasks = [fetch_live_async(sym, "NSE") for sym in nse_tuple]
-            bse_tasks = [fetch_live_async(sym, "BSE") for sym in bse_tuple]
-            nse_res = await asyncio.gather(*nse_tasks)
-            bse_res = await asyncio.gather(*bse_tasks)
-            return pd.DataFrame(nse_res), pd.DataFrame(bse_res)
-        return asyncio.run(fetch_all())
-
+    async def fetch_live_async(sym, ex): return await asyncio.to_thread(get_yf_quote, sym, ex)
     @st.cache_data(ttl=15)
     def get_cached_live_markets_safe(nse_tuple, bse_tuple):
-        try:
-            return execute_exchange_fetch(nse_tuple, bse_tuple)
-        except pybreaker.CircuitBreakerError:
-            df_fallback_nse = pd.DataFrame([{"Symbol": s, "Exchange": "NSE", "Last (₹)": "Offline", "Change (%)": 0.0} for s in nse_tuple])
-            df_fallback_bse = pd.DataFrame([{"Symbol": s, "Exchange": "BSE", "Last (₹)": "Offline", "Change (%)": 0.0} for s in bse_tuple])
-            return df_fallback_nse, df_fallback_bse
+        async def fetch_all():
+            n_res = await asyncio.gather(*(fetch_live_async(s, "NSE") for s in nse_tuple))
+            b_res = await asyncio.gather(*(fetch_live_async(s, "BSE") for s in bse_tuple))
+            return pd.DataFrame(n_res), pd.DataFrame(b_res)
+        return asyncio.run(fetch_all())
 
-    df_nse, df_bse = get_cached_live_markets_safe(
-        tuple(st.session_state.nse_watchlist), 
-        tuple(st.session_state.bse_watchlist)
-    )
-
-    if not df_nse.empty:
-        df_nse["Last (₹)"] = df_nse["Last (₹)"].astype(str)
-        df_nse["Change (%)"] = df_nse["Change (%)"].astype(str)
-    if not df_bse.empty:
-        df_bse["Last (₹)"] = df_bse["Last (₹)"].astype(str)
-        df_bse["Change (%)"] = df_bse["Change (%)"].astype(str)
-
-    placeholder_nse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>NSE Equities</h4>", unsafe_allow_html=True)
-    placeholder_nse.dataframe(df_nse, width="stretch", hide_index=True)
-
-    placeholder_bse.markdown("<h4 style='color:#FFFFFF; font-size: 16px;'>BSE Equities</h4>", unsafe_allow_html=True)
-    placeholder_bse.dataframe(df_bse, width="stretch", hide_index=True)
-
-# --- TAB 4: PORTFOLIO & QUANT SUITE (Consolidated) ---
-with tab4:
-    st.markdown("<br>", unsafe_allow_html=True)
+    df_nse, df_bse = get_cached_live_markets_safe(tuple(st.session_state.nse_watchlist), tuple(st.session_state.bse_watchlist))
     
+    c_t1, c_t2 = st.columns(2)
+    c_t1.markdown("#### NSE Equities")
+    if not df_nse.empty: 
+        df_nse["Last (₹)"] = df_nse["Last (₹)"].astype(str)
+        c_t1.dataframe(df_nse, width="stretch", hide_index=True)
+        
+    c_t2.markdown("#### BSE Equities")
+    if not df_bse.empty: 
+        df_bse["Last (₹)"] = df_bse["Last (₹)"].astype(str)
+        c_t2.dataframe(df_bse, width="stretch", hide_index=True)
+
+elif selected_page == "Portfolio & Quant Suite":
     if "quant_results" not in st.session_state:
-        st.info("💡 Run the **Execute Pipeline** action from the sidebar to generate portfolio models and quantitative metrics.")
+        st.info("💡 Open the sidebar menu and click **Execute Pipeline** to generate portfolio models.")
     else:
         res = st.session_state.quant_results
+        st.markdown("#### 🛡️ Risk Diagnostics")
+        if "CIRCUIT BREAKER" in res["risk_status"]: st.error(res["risk_status"])
+        elif "WARNING" in res["risk_status"]: st.warning(res["risk_status"])
+        else: st.success(f"Status: Nominal (Current Drawdown: {res['current_dd']*100:.2f}%)")
         
-        st.success("Pipeline executed successfully! Results loaded.")
-
-        # 1. Risk Status Section
-        st.markdown("<h4 style='font-size: 16px;'>🛡️ Risk Diagnostics</h4>", unsafe_allow_html=True)
-        if "CIRCUIT BREAKER" in res["risk_status"]:
-            st.error(res["risk_status"])
-        elif "WARNING" in res["risk_status"]:
-            st.warning(res["risk_status"])
-        else:
-            st.success(f"Status: Nominal (Current Drawdown: {res['current_dd']*100:.2f}%)")
-
-        st.markdown("<hr style='border-color: #2B2B2B; margin: 20px 0;'>", unsafe_allow_html=True)
-
-        # 2. Optimal Weights Section
-        st.markdown("<h4 style='font-size: 16px;'>⚖️ Optimal Portfolio Allocations</h4>", unsafe_allow_html=True)
+        st.markdown("<hr style='border-color: #2B2B2B;'>", unsafe_allow_html=True)
+        st.markdown("#### ⚖️ Optimal Portfolio Allocations")
         cols = st.columns(len(res["safe_weights"]) if res["safe_weights"] else 1)
         for i, (ticker, weight) in enumerate(res["safe_weights"].items()):
-            with cols[i]:
-                st.metric(label=ticker, value=f"{weight * 100:.2f}%")
+            with cols[i]: st.metric(label=ticker, value=f"{weight * 100:.2f}%")
 
-        st.markdown("<hr style='border-color: #2B2B2B; margin: 20px 0;'>", unsafe_allow_html=True)
-
-        # 3. Analytics Metrics Section
-        st.markdown("<h4 style='font-size: 16px;'>📈 Quantitative Performance Analytics</h4>", unsafe_allow_html=True)
+        st.markdown("<hr style='border-color: #2B2B2B;'>", unsafe_allow_html=True)
+        st.markdown("#### 📈 Quantitative Performance")
         m_cols = st.columns(4)
         m_cols[0].metric("CAGR", f"{res['metrics'].get('CAGR', 0)}%")
         m_cols[1].metric("Sharpe Ratio", f"{res['metrics'].get('Sharpe Ratio', 0)}")
         m_cols[2].metric("Ann. Volatility", f"{res['metrics'].get('Annualized Volatility', 0)}%")
         m_cols[3].metric("Max Drawdown", f"{res['metrics'].get('Maximum Drawdown', 0)}%")
-
-        st.markdown("<br><h5 style='font-size: 14px;'>Portfolio Equity Curve</h5>", unsafe_allow_html=True)
         st.line_chart(res["equity_curve"])
 
-        st.markdown("<hr style='border-color: #2B2B2B; margin: 20px 0;'>", unsafe_allow_html=True)
-
-        # 4. Price History Section
-        st.markdown("<h4 style='font-size: 16px;'>📊 Asset Price History Matrix</h4>", unsafe_allow_html=True)
-        st.line_chart(res["df_prices"])
-
-# --- TAB 5: SCREENER & DIAGNOSTICS ---
-with tab5:
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<h4 style='font-size: 16px;'>⚡ Technical & Fundamental Stock Screener</h4>", unsafe_allow_html=True)
-    
+elif selected_page == "Screener & Diagnostics":
     screen_col1, screen_col2 = st.columns([3, 1])
-    with screen_col1:
-        target_symbol = st.text_input("Enter Ticker to Scan", value="RELIANCE", placeholder="e.g. RELIANCE, TCS, VMART").strip().upper()
-    with screen_col2:
-        scan_btn = st.button("Run Diagnostic Scan", width="stretch")
+    with screen_col1: target_symbol = st.text_input("Enter Ticker", value="VMART", placeholder="e.g. NOCIL, VMART").strip().upper()
+    with screen_col2: scan_btn = st.button("Run Diagnostic Scan", width="stretch")
 
     if scan_btn or target_symbol:
         import yfinance as yf
         yf_target = target_symbol if ("." in target_symbol) else f"{target_symbol}.NS"
-        
-        with st.spinner(f"Fetching technical & fundamental indicators for {target_symbol}..."):
+        with st.spinner(f"Analyzing {target_symbol}..."):
             try:
                 ticker_obj = yf.Ticker(yf_target)
                 hist = ticker_obj.history(period="6mo")
                 info = ticker_obj.info
-                
                 if not hist.empty:
-                    hist['EMA20'] = hist['Close'].ewm(span=20, adjust=False).mean()
-                    hist['EMA50'] = hist['Close'].ewm(span=50, adjust=False).mean()
+                    hist['EMA20'], hist['EMA50'] = hist['Close'].ewm(span=20).mean(), hist['Close'].ewm(span=50).mean()
                     hist['RSI'] = calculate_rsi(hist['Close'])
                     
-                    last_price = hist['Close'].iloc[-1]
-                    last_rsi = round(hist['RSI'].iloc[-1], 2)
-                    last_ema20 = hist['EMA20'].iloc[-1]
-                    last_ema50 = hist['EMA50'].iloc[-1]
-                    
-                    vol_avg = hist['Volume'].rolling(20).mean().iloc[-1]
-                    last_vol = hist['Volume'].iloc[-1]
-                    vol_surge = (last_vol > 1.2 * vol_avg) if vol_avg > 0 else False
-                    
-                    trend_signal = "🟢 BULLISH (20 EMA > 50 EMA)" if last_ema20 > last_ema50 else "🔴 BEARISH (20 EMA < 50 EMA)"
+                    last_price, last_rsi = hist['Close'].iloc[-1], round(hist['RSI'].iloc[-1], 2)
+                    trend_signal = "🟢 BULLISH" if hist['EMA20'].iloc[-1] > hist['EMA50'].iloc[-1] else "🔴 BEARISH"
                     rsi_status = "🔥 Overbought" if last_rsi > 70 else ("🧊 Oversold" if last_rsi < 30 else "⚖️ Neutral")
                     
-                    pe_ratio = info.get("trailingPE", "N/A")
-                    pb_ratio = info.get("priceToBook", "N/A")
-                    roe = info.get("returnOnEquity", "N/A")
-                    roe_str = f"{round(roe * 100, 2)}%" if isinstance(roe, (int, float)) else "N/A"
-                    profit_margin = info.get("profitMargins", "N/A")
-                    margin_str = f"{round(profit_margin * 100, 2)}%" if isinstance(profit_margin, (int, float)) else "N/A"
-
-                    st.markdown("<h5 style='color:#2962FF; font-size: 14px;'>Technical Momentum Signals</h5>", unsafe_allow_html=True)
+                    st.markdown("##### Technical Signals")
                     m1, m2, m3, m4 = st.columns(4)
                     m1.metric("Current Price", f"₹{round(last_price, 2)}")
                     m2.metric("RSI (14)", f"{last_rsi}", delta=rsi_status, delta_color="off")
-                    m3.metric("Trend Signal", trend_signal.split()[0], delta=trend_signal.split()[1])
-                    m4.metric("Volume Spike", "YES ⚡" if vol_surge else "NORMAL")
-
-                    st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0;'>", unsafe_allow_html=True)
-
-                    st.markdown("<h5 style='color:#00E676; font-size: 14px;'>Fundamental Health Overview</h5>", unsafe_allow_html=True)
-                    f1, f2, f3, f4 = st.columns(4)
-                    f1.metric("Trailing P/E Ratio", f"{pe_ratio if isinstance(pe_ratio, (int, float)) else 'N/A'}")
-                    f2.metric("Price-to-Book (P/B)", f"{pb_ratio if isinstance(pb_ratio, (int, float)) else 'N/A'}")
-                    f3.metric("Return on Equity (ROE)", roe_str)
-                    f4.metric("Profit Margin", margin_str)
-
-                    st.markdown("<br><h5 style='font-size: 14px;'>Price Action & Moving Averages (20 vs 50 EMA)</h5>", unsafe_allow_html=True)
+                    m3.metric("Trend Signal", trend_signal)
+                    
+                    st.markdown("<br>##### Price Action & Moving Averages (20 vs 50 EMA)", unsafe_allow_html=True)
                     st.line_chart(hist[['Close', 'EMA20', 'EMA50']])
+                else: st.error("Could not retrieve price action.")
+            except Exception as e: st.error(f"Error: {e}")
 
-                else:
-                    st.error(f"Could not retrieve historical price action for {target_symbol}.")
-            except Exception as e:
-                st.error(f"Error executing scan: {e}")
+elif selected_page == "Practice Wallet":
+    user_id = st.session_state.user.id
+    def get_wallet_balance():
+        res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
+        if not res.data:
+            supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
+            return 1000000.00
+        return float(res.data[0]["balance"])
+
+    def get_holdings():
+        res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
+        return res.data
+        
+    def fetch_live_price_for_wallet(symbol, exchange):
+        import yfinance as yf
+        yf_ticker = f"{symbol}.NS" if exchange == "NSE" else f"{symbol}.BO"
+        try:
+            return yf.Ticker(yf_ticker).fast_info.get('lastPrice', "N/A")
+        except: return "N/A"
+
+    balance = get_wallet_balance()
+    holdings = get_holdings()
+    
+    st.markdown(
+        f"""
+        <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
+            <div style="font-size: 13px; color: #9AA0A6; text-transform: uppercase; font-weight: 500;">Available Buying Power</div>
+            <div style="font-size: 32px; color: #00E676; font-weight: 700;">₹{balance:,.2f}</div>
+        </div>
+        """, unsafe_allow_html=True
+    )
+    
+    col_trade, col_port = st.columns([1, 2])
+    with col_trade:
+        st.markdown("##### Execute Trade")
+        with st.form("trade_form"):
+            trade_ticker = st.text_input("Ticker Symbol")
+            trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
+            trade_qty = st.number_input("Quantity", min_value=1, step=1)
+            trade_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
+            if st.form_submit_button("Submit Order", width="stretch") and trade_ticker:
+                with st.spinner("Executing..."):
+                    price = fetch_live_price_for_wallet(trade_ticker.upper(), trade_exchange)
+                    if price == "N/A":
+                        st.error("Invalid Ticker.")
+                    else:
+                        total_cost, ticker_db = float(price) * trade_qty, trade_ticker.upper()
+                        if trade_action == "BUY":
+                            if balance >= total_cost:
+                                supabase.table("practice_wallets").update({"balance": balance - total_cost}).eq("user_id", user_id).execute()
+                                existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
+                                if existing:
+                                    new_qty = existing["quantity"] + trade_qty
+                                    new_avg = ((existing["quantity"] * float(existing["avg_price"])) + total_cost) / new_qty
+                                    supabase.table("practice_holdings").update({"quantity": new_qty, "avg_price": new_avg}).eq("id", existing["id"]).execute()
+                                else: supabase.table("practice_holdings").insert({"user_id": user_id, "ticker": ticker_db, "quantity": trade_qty, "avg_price": price}).execute()
+                                st.success(f"Bought {trade_qty} {ticker_db}!")
+                                time.sleep(1)
+                                st.rerun()
+                            else: st.error("Insufficient Funds.")
+                        elif trade_action == "SELL":
+                            existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
+                            if existing and existing["quantity"] >= trade_qty:
+                                supabase.table("practice_wallets").update({"balance": balance + total_cost}).eq("user_id", user_id).execute()
+                                new_qty = existing["quantity"] - trade_qty
+                                if new_qty == 0: supabase.table("practice_holdings").delete().eq("id", existing["id"]).execute()
+                                else: supabase.table("practice_holdings").update({"quantity": new_qty}).eq("id", existing["id"]).execute()
+                                st.success(f"Sold {trade_qty} {ticker_db}!")
+                                time.sleep(1)
+                                st.rerun()
+                            else: st.error("Not enough shares to sell.")
+
+    with col_port:
+        st.markdown("##### Current Holdings")
+        if not holdings: st.info("Portfolio empty.")
+        else:
+            portfolio_data = []
+            for h in holdings:
+                live_price = fetch_live_price_for_wallet(h["ticker"], "NSE")
+                live_price = float(live_price) if live_price != "N/A" else float(h["avg_price"])
+                invested, current_val = h["quantity"] * float(h["avg_price"]), h["quantity"] * live_price
+                portfolio_data.append({
+                    "Asset": h["ticker"], "Qty": h["quantity"], "Avg Buy": round(float(h["avg_price"]), 2),
+                    "Live Price": round(live_price, 2), "P&L (₹)": round(current_val - invested, 2)
+                })
+            st.dataframe(pd.DataFrame(portfolio_data), width="stretch", hide_index=True)
