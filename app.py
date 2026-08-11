@@ -680,41 +680,8 @@ elif selected_page == "Practice Wallet":
                     "Live Price": round(live_price, 2), "P&L (₹)": round(current_val - invested, 2)
                 })
             st.dataframe(pd.DataFrame(portfolio_data), width="stretch", hide_index=True)
-# --- TAB 6: PAPER TRADING SIMULATOR ---
-with tab6:
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("<h4 style='font-size: 16px;'>🎮 Paper Trading Simulator</h4>", unsafe_allow_html=True)
-    
-    user_id = st.session_state.user.id
-    
-    # --- DB Helper Functions ---
-    def get_wallet_balance():
-        res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
-        if not res.data:
-            supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
-            return 1000000.00
-        return float(res.data[0]["balance"])
 
-    def get_holdings():
-        res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
-        return res.data
-
-    balance = get_wallet_balance()
-    holdings = get_holdings()
-    
-    st.markdown(
-        f"""
-        <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
-            <div style="font-size: 13px; color: #9AA0A6; text-transform: uppercase; font-weight: 500;">Available Buying Power</div>
-            <div style="font-size: 32px; color: #00E676; font-weight: 700;">₹{balance:,.2f}</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    col_trade, col_port = st.columns([1, 2])
-    
-    # --- TRADE EXECUTION PANEL ---
+ # --- TRADE EXECUTION PANEL ---
     with col_trade:
         st.markdown("<h5 style='font-size: 14px;'>Execute Trade</h5>", unsafe_allow_html=True)
         with st.form("trade_form"):
