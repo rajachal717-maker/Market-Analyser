@@ -196,7 +196,7 @@ if not st.session_state.user:
             st.markdown("")
             signup_btn = st.form_submit_button("Create Account", width="stretch")
             
-            # ... (keep the rest of the signup logic the same) ...
+        
     
 
 # =====================================================================
@@ -299,15 +299,23 @@ def calculate_rsi(series, period=14):
 
 # --- 5. SIDEBAR NAVIGATION & CONFIGURATION ---
 with st.sidebar:
+    
+    # Safely extract the email whether it's a Supabase object or a Python dictionary
+    if isinstance(st.session_state.user, dict):
+        user_email = st.session_state.user.get("email", "Active User")
+    else:
+        user_email = getattr(st.session_state.user, "email", "Active User")
+
     st.markdown(
         f"""
         <div style="background-color: #121212; padding: 16px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
             <div style="font-size: 11px; color: #9AA0A6; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Active Session</div>
-            <div style="font-size: 13px; color: #FFFFFF; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{st.session_state.user.email}</div>
+            <div style="font-size: 13px; color: #FFFFFF; margin-top: 4px; overflow: hidden; text-overflow: ellipsis;">{user_email}</div>
         </div>
         """,
         unsafe_allow_html=True
     )
+
     
     # -- SAAS MENU ROUTING --
     selected_page = option_menu(
