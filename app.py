@@ -301,6 +301,9 @@ elif selected_page == "Live Market Feed":
                     st.rerun()
 
 elif selected_page == "Screener & Diagnostics":
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    
     screen_col1, screen_col2 = st.columns([3, 1])
     with screen_col1: target_symbol = st.text_input("Enter Ticker", value="VMART", placeholder="e.g. NOCIL").strip().upper()
     with screen_col2: scan_btn = st.button("Run Multi-Indicator Scan", width="stretch")
@@ -308,23 +311,23 @@ elif selected_page == "Screener & Diagnostics":
     if scan_btn or target_symbol:
         import yfinance as yf
         yf_target = target_symbol if ("." in target_symbol) else f"{target_symbol}.NS"
-        with st.spinner(f"Analyzing {target_symbol}..."):
+        with st.spinner(f"Rendering Professional Charts for {target_symbol}..."):
             try:
                 ticker_obj = yf.Ticker(yf_target)
+                # Pull 6 months of data to ensure smooth moving averages
                 hist = ticker_obj.history(period="6mo")
+                
                 if not hist.empty:
-                    # Feature 4: Expanded Technical Indicators (EMA 20/50, RSI, MACD, Bollinger Bands)
+                    # Calculate Technicals
                     hist['EMA20'] = hist['Close'].ewm(span=20).mean()
                     hist['EMA50'] = hist['Close'].ewm(span=50).mean()
                     
-                    # RSI Calculation
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                     rs = gain / loss
                     hist['RSI'] = 100 - (100 / (1 + rs))
                     
-                    # Bollinger Bands
                     hist['BB_Mid'] = hist['Close'].rolling(window=20).mean()
                     hist['BB_Std'] = hist['Close'].rolling(window=20).std()
                     hist['BB_Upper'] = hist['BB_Mid'] + (hist['BB_Std'] * 2)
@@ -334,21 +337,64 @@ elif selected_page == "Screener & Diagnostics":
                     last_rsi = hist['RSI'].iloc[-1]
                     trend_signal = "🟢 BULLISH" if hist['EMA20'].iloc[-1] > hist['EMA50'].iloc[-1] else "🔴 BEARISH"
                     
+                    # Top Metrics Matrix
                     st.markdown("##### Technical Diagnostics Matrix")
                     m1, m2, m3 = st.columns(3)
                     m1.metric("Current Price", f"₹{round(last_price, 2)}")
                     m2.metric("RSI (14)", f"{round(last_rsi, 2)}")
                     m3.metric("Trend Signal", trend_signal)
                     
-                    st.markdown("<br>\n\n##### Price Action & Trend EMA (20 vs 50)", unsafe_allow_html=True)
-                    st.line_chart(hist[['Close', 'EMA20', 'EMA50']])
+                    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
                     
-                    st.markdown("##### Bollinger Bands Volatility Matrix", unsafe_allow_html=True)
-                    st.line_chart(hist[['Close', 'BB_Upper', 'BB_Lower']])
-                else: st.error("Could not fetch ticker price history.")
-            except Exception as e: st.error(f"Error: {e}")
+                    # --- PLOTLY PROFESSIONAL CHARTING ---
+                    # Create a 2-row subplot (Price on top, Volume on bottom)
+                    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                        vertical_spacing=0.03, row_heights=[0.75, 0.25])
+                    
+                    # 1. Candlestick Chart
+                    fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'],
+                                                 low=hist['Low'], close=hist['Close'], name='Price'), 
+                                  row=1, col=1)
+                    
+                    # 2. Moving Averages
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA20'], line=dict(color='#00E676', width=1.5), name='EMA 20'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA50'], line=dict(color='#FF1744', width=1.5), name='EMA 50'), row=1, col=1)
+                    
+                    # 3. Bollinger Bands (With Shaded Area)
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Upper'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), name='Upper BB'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Lower'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), 
+                                             fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)', name='Lower BB'), row=1, col=1)
+                    
+                    # 4. Volume Bars (Red/Green based on close vs open)
+                    colors = ['#00E676' if row['Close'] >= row['Open'] else '#FF1744' for _, row in hist.iterrows()]
+                    fig.add_trace(go.Bar(x=hist.index, y=hist['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
+                    
+                    # Polish the Layout (Dark Mode, TradingView Style)
+                    fig.update_layout(
+                        template='plotly_dark',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        xaxis_rangeslider_visible=False,
+                        height=650,
+                        margin=dict(l=0, r=0, t=10, b=0),
+                        showlegend=False,
+                        hovermode='x unified'
+                    )
+                    
+                    fig.update_yaxes(title_text="Price (₹)", row=1, col=1, gridcolor='#1E1E1E')
+                    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor='#1E1E1E')
+                    fig.update_xaxes(gridcolor='#1E1E1E')
 
-elif selected_page == "Practice Wallet & Journal":
+                    # Render it directly into the Streamlit app
+                    st.plotly_chart(fig, use_container_width=True)
+
+                else: 
+                    st.error("Could not fetch ticker price history.")
+            except Exception as e: 
+                st.error(f"Error rendering charts: {e}")
+
+                   
+ elif selected_page == "Practice Wallet & Journal":
     user_id = st.session_state.user['id']
 
     def get_wallet():
