@@ -538,3 +538,53 @@ elif selected_page == "Practice Wallet":
                     "Live Price": round(live_price, 2), "P&L (₹)": round(current_val - invested, 2)
                 })
             st.dataframe(pd.DataFrame(portfolio_data), width="stretch", hide_index=True)
+import sqlite3
+import hashlib
+
+# =====================================================================
+# 🗄️ PROFESSIONAL LOCAL SQLITE BACKEND
+# =====================================================================
+def init_db():
+    # Connects to a persistent local file on your machine
+    conn = sqlite3.connect("market_data.db", check_same_thread=False)
+    c = conn.cursor()
+    
+    # Create robust professional tables
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    email TEXT UNIQUE, 
+                    password TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )''')
+                
+    c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (
+                    user_id INTEGER PRIMARY KEY, 
+                    balance REAL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )''')
+                
+    c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    user_id INTEGER, 
+                    ticker TEXT, 
+                    quantity INTEGER, 
+                    avg_price REAL,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                )''')
+                
+    conn.commit()
+    return conn
+
+db_conn = init_db()
+
+# Ensure a default professional profile always exists so you don't get locked out
+def get_or_create_default_user():
+    c = db_conn.cursor()
+    c.execute("SELECT id, email FROM users WHERE id = 1")
+    user = c.fetchone()
+    if not user:
+        c.execute("INSERT OR IGNORE INTO users (id, email, password) VALUES (1, 'quant@institutional.terminal', 'local')")
+        c.execute("INSERT OR IGNORE INTO practice_wallets (user_id, balance) VALUES (1, 1000000.00)")
+        db_conn.commit()
+        user = (1, 'quant@institutional.terminal')
+    return {"id": user[0], "email": user[1]}
