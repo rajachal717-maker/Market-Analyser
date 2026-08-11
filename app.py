@@ -587,25 +587,41 @@ elif selected_page == "Screener & Diagnostics":
                 else: st.error("Could not retrieve price action.")
             except Exception as e: st.error(f"Error: {e}")
 
+
 elif selected_page == "Practice Wallet":
     
-    # Safely extract the ID whether it's a Supabase object or a Python dictionary
+    # 1. Safely extract ID with fallback
     if isinstance(st.session_state.user, dict):
         user_id = st.session_state.user.get("id")
     else:
         user_id = getattr(st.session_state.user, "id", None)
 
+    # 2. Force the UI to show us the REAL error if one happens
     def get_wallet_balance():
-        res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
-        if not res.data:
-            supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
-            return 1000000.00
-        return float(res.data[0]["balance"])
-
+        if not user_id:
+            st.error("Authentication Error: user_id is missing.")
+            return 0.0
+            
+        try:
+            res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
+            if not res.data:
+                supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
+                return 1000000.00
+            return float(res.data[0]["balance"])
+        except Exception as e:
+            st.error(f"Supabase Database Error: {str(e)}")
+            return 0.0
 
     def get_holdings():
-        res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
-        return res.data
+        if not user_id: return []
+        try:
+            res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
+            return res.data
+        except Exception as e:
+            st.error(f"Holdings Error: {str(e)}")
+            return []
+
+    # ... keep the rest of the Practice Wallet UI the same ...
         
     def fetch_live_price_for_wallet(symbol, exchange):
         import yfinance as yf
