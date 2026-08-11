@@ -175,7 +175,11 @@ if not st.session_state.user:
     st.markdown("<h2 style='text-align: center; margin-bottom: 8px;'>✨ Welcome to Terminal</h2>", unsafe_allow_html=True)
     st.markdown("<p style='text-align: center; color: #9AA0A6; font-size: 14px; margin-bottom: 32px;'>Sign in to access your quantitative workflows.</p>", unsafe_allow_html=True)
 
+    # ADD THIS DIAGNOSTIC LINE:
+    st.warning(f"🔍 DEBUG: The app is using a key that starts with: {supabase.supabase_key[:15]}...")
+
     auth_tab1, auth_tab2 = st.tabs(["Sign In", "Create Account"])
+    
 
     with auth_tab1:
         with st.form("login_form"):
