@@ -34,16 +34,16 @@ exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
-try: 
-  def init_supabase() -> Client:
+def init_supabase() -> Client:
     url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
     
-    # YOUR KEY GOES RIGHT HERE:
-    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
+    # PASTE YOUR KEY INSIDE THESE QUOTES:
+    key = "PASTE_YOUR_LONG_KEY_HERE"
     
     return create_client(url, key)
 
 supabase = init_supabase()
+ 
 
 
 
@@ -63,6 +63,7 @@ class SecurityVault:
         return self.aes.decrypt(token[:12], token[12:], None)
 
 vault = SecurityVault()
+
 
 # --- FINTECH OLED GLOBAL CSS CONFIGURATION ---
 THEME_CSS = """
