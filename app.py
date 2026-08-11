@@ -39,7 +39,9 @@ def init_supabase() -> Client:
     raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
     
     url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-    key = raw_key if raw_key else "sb_publishable_C087lxhuIIfwtXmFj-taIw_nR_z1Og7"
+    
+    # PASTE YOUR REAL ANON KEY HERE starting with "eyJhb..."
+    key = raw_key if raw_key else "PASTE_YOUR_REAL_SUPABASE_ANON_KEY_HERE"
     
     if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"https://{url}"
@@ -47,6 +49,7 @@ def init_supabase() -> Client:
     return create_client(url, key)
 
 supabase = init_supabase()
+
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
 class SecurityVault:
@@ -682,3 +685,124 @@ elif selected_page == "Practice Wallet":
                     "Live Price": round(live_price, 2), "P&L (₹)": round(current_val - invested, 2)
                 })
             st.dataframe(pd.DataFrame(portfolio_data), width="stretch", hide_index=True)
+# --- TAB 6: PAPER TRADING SIMULATOR ---
+with tab6:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<h4 style='font-size: 16px;'>🎮 Paper Trading Simulator</h4>", unsafe_allow_html=True)
+    
+    user_id = st.session_state.user.id
+    
+    # --- DB Helper Functions ---
+    def get_wallet_balance():
+        res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
+        if not res.data:
+            supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
+            return 1000000.00
+        return float(res.data[0]["balance"])
+
+    def get_holdings():
+        res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
+        return res.data
+
+    balance = get_wallet_balance()
+    holdings = get_holdings()
+    
+    st.markdown(
+        f"""
+        <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #2B2B2B; margin-bottom: 24px;">
+            <div style="font-size: 13px; color: #9AA0A6; text-transform: uppercase; font-weight: 500;">Available Buying Power</div>
+            <div style="font-size: 32px; color: #00E676; font-weight: 700;">₹{balance:,.2f}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    col_trade, col_port = st.columns([1, 2])
+    
+    # --- TRADE EXECUTION PANEL ---
+    with col_trade:
+        st.markdown("<h5 style='font-size: 14px;'>Execute Trade</h5>", unsafe_allow_html=True)
+        with st.form("trade_form"):
+            trade_ticker = st.text_input("Ticker Symbol", placeholder="e.g. RELIANCE, TCS")
+            trade_exchange = st.selectbox("Exchange", ["NSE", "BSE"])
+            trade_qty = st.number_input("Quantity", min_value=1, step=1)
+            trade_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
+            submit_trade = st.form_submit_button("Submit Order", width="stretch")
+            
+            if submit_trade and trade_ticker:
+                with st.spinner("Executing..."):
+                    quote = get_yf_quote(trade_ticker, trade_exchange)
+                    if quote["Last (₹)"] == "N/A":
+                        st.error("Invalid Ticker.")
+                    else:
+                        price = float(quote["Last (₹)"])
+                        total_cost = price * trade_qty
+                        ticker_db = quote['Symbol']
+                        
+                        if trade_action == "BUY":
+                            if balance >= total_cost:
+                                # Deduct Balance
+                                new_balance = balance - total_cost
+                                supabase.table("practice_wallets").update({"balance": new_balance}).eq("user_id", user_id).execute()
+                                
+                                # Update Holdings
+                                existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
+                                if existing:
+                                    new_qty = existing["quantity"] + trade_qty
+                                    new_avg = ((existing["quantity"] * float(existing["avg_price"])) + total_cost) / new_qty
+                                    supabase.table("practice_holdings").update({"quantity": new_qty, "avg_price": new_avg}).eq("id", existing["id"]).execute()
+                                else:
+                                    supabase.table("practice_holdings").insert({"user_id": user_id, "ticker": ticker_db, "quantity": trade_qty, "avg_price": price}).execute()
+                                st.success(f"Bought {trade_qty} shares of {ticker_db}!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("Insufficient Funds.")
+                                
+                        elif trade_action == "SELL":
+                            existing = next((item for item in holdings if item["ticker"] == ticker_db), None)
+                            if existing and existing["quantity"] >= trade_qty:
+                                # Add Balance
+                                new_balance = balance + total_cost
+                                supabase.table("practice_wallets").update({"balance": new_balance}).eq("user_id", user_id).execute()
+                                
+                                # Update Holdings
+                                new_qty = existing["quantity"] - trade_qty
+                                if new_qty == 0:
+                                    supabase.table("practice_holdings").delete().eq("id", existing["id"]).execute()
+                                else:
+                                    supabase.table("practice_holdings").update({"quantity": new_qty}).eq("id", existing["id"]).execute()
+                                st.success(f"Sold {trade_qty} shares of {ticker_db}!")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("You do not own enough shares to sell.")
+
+    # --- PORTFOLIO PANEL ---
+    with col_port:
+        st.markdown("<h5 style='font-size: 14px;'>Current Holdings</h5>", unsafe_allow_html=True)
+        if not holdings:
+            st.info("Your portfolio is currently empty. Execute a buy order to start practicing.")
+        else:
+            portfolio_data = []
+            for h in holdings:
+                # Fetch live price for P&L calculation
+                live_q = get_yf_quote(h["ticker"], "NSE") # Defaulting lookup to NSE for portfolio valuation
+                live_price = float(live_q["Last (₹)"]) if live_q["Last (₹)"] != "N/A" else float(h["avg_price"])
+                
+                invested = h["quantity"] * float(h["avg_price"])
+                current_val = h["quantity"] * live_price
+                pnl = current_val - invested
+                pnl_pct = (pnl / invested) * 100 if invested > 0 else 0
+                
+                portfolio_data.append({
+                    "Asset": h["ticker"],
+                    "Qty": h["quantity"],
+                    "Avg Buy (₹)": round(float(h["avg_price"]), 2),
+                    "Live Price (₹)": round(live_price, 2),
+                    "P&L (₹)": round(pnl, 2),
+                    "P&L (%)": f"{round(pnl_pct, 2)}%"
+                })
+            
+            df_portfolio = pd.DataFrame(portfolio_data)
+            st.dataframe(df_portfolio, width="stretch", hide_index=True)
