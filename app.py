@@ -38,7 +38,7 @@ def init_supabase() -> Client:
     url = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
     
     # PASTE YOUR KEY INSIDE THESE QUOTES:
-    key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
+    key = "sb_publishable_C087lxhuIIfwtXmFj-talw_nR_z10g7"
     
     return create_client(url, key)
 
