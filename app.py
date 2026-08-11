@@ -32,6 +32,7 @@ st.set_page_config(
 # --- CIRCUIT BREAKER CONFIGURATION ---
 exchange_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
+
 # --- 1. SUPABASE CONNECTION SETUP ---
 @st.cache_resource
 def init_supabase() -> Client:
@@ -177,41 +178,26 @@ if not st.session_state.user:
 
     with auth_tab1:
         with st.form("login_form"):
-            login_email = st.text_input("Email")
-            login_password = st.text_input("Password", type="password")
+            # Added autocomplete="email"
+            login_email = st.text_input("Email", autocomplete="email")
+            # Added autocomplete="current-password"
+            login_password = st.text_input("Password", type="password", autocomplete="current-password")
             st.markdown("")
             login_btn = st.form_submit_button("Continue", width="stretch")
 
-            if login_btn:
-                try:
-                    response = supabase.auth.sign_in_with_password({
-                        "email": login_email,
-                        "password": login_password,
-                    })
-                    st.session_state.user = response.user
-                    st.success("Authentication successful! Initializing Crypto Vault...")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Login failed: {e}")
+            # ... (keep the rest of the login logic the same) ...
 
     with auth_tab2:
         with st.form("signup_form"):
-            signup_email = st.text_input("Email")
-            signup_password = st.text_input("Password", type="password")
+            # Added autocomplete="email"
+            signup_email = st.text_input("Email", autocomplete="email")
+            # Added autocomplete="new-password" so browsers offer to generate a strong password
+            signup_password = st.text_input("Password", type="password", autocomplete="new-password")
             st.markdown("")
             signup_btn = st.form_submit_button("Create Account", width="stretch")
-
-            if signup_btn:
-                try:
-                    response = supabase.auth.sign_up({
-                        "email": signup_email,
-                        "password": signup_password,
-                    })
-                    st.success("Account registered! Please check your email inbox to verify.")
-                except Exception as e:
-                    st.error(f"Registration failed: {e}")
-
-    st.stop()
+            
+            # ... (keep the rest of the signup logic the same) ...
+    
 
 # =====================================================================
 # MAIN APPLICATION
