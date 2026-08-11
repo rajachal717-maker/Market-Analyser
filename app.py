@@ -588,13 +588,20 @@ elif selected_page == "Screener & Diagnostics":
             except Exception as e: st.error(f"Error: {e}")
 
 elif selected_page == "Practice Wallet":
-    user_id = st.session_state.user.id
+    
+    # Safely extract the ID whether it's a Supabase object or a Python dictionary
+    if isinstance(st.session_state.user, dict):
+        user_id = st.session_state.user.get("id")
+    else:
+        user_id = getattr(st.session_state.user, "id", None)
+
     def get_wallet_balance():
         res = supabase.table("practice_wallets").select("balance").eq("user_id", user_id).execute()
         if not res.data:
             supabase.table("practice_wallets").insert({"user_id": user_id, "balance": 1000000.00}).execute()
             return 1000000.00
         return float(res.data[0]["balance"])
+
 
     def get_holdings():
         res = supabase.table("practice_holdings").select("*").eq("user_id", user_id).execute()
