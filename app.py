@@ -23,7 +23,7 @@ from langchain_groq import ChatGroq
 # Do not remove the quotation marks!
 
 SUPABASE_URL_EXACT = "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-SUPABASE_KEY_EXACT = "sb_publishable_C087lxhuIIfwtXmFj-talw_nR_z10g7"
+SUPABASE_KEY_EXACT = "sb_publishable_OO6iFaWwUyyUnFn4Tfa9cg_OO6WZiqS"
 @st.cache_resource
 def init_supabase() -> Client:
     # We are forcing the app to use these exact strings to prevent Cloud Secret bugs.
