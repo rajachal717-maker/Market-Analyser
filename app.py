@@ -39,16 +39,16 @@ def init_supabase() -> Client:
     raw_key = os.environ.get("SUPABASE_KEY", "").strip().strip("'\"")
     
     url = raw_url if raw_url else "https://zthirxdbxhdjfpbcpqmk.supabase.co"
-    # Fallback key logic - if Render/Streamlit fails to load the ENV var, it uses this
     key = raw_key if raw_key else "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
-      try: 
-        key = raw_key if raw_key else "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRwaGl2dGphcWllaHlvYWlmc3ZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ4NzQ3NzQsImV4cCI6MjEwMDQ1MDc3NH0.pWzNxv4PZFlHcGghvwOdRlcOJY_JWTwyZA2vZ25bLUg"
-        if url and not url.startswith("http://") and not url.startswith("https://"):
+    
+    
+    if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"https://{url}"
         
     return create_client(url, key)
 
 supabase = init_supabase()
+
 
 # --- 2. CRYPTOGRAPHIC VAULT (AES-256-GCM) ---
 class SecurityVault:
