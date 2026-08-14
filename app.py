@@ -118,7 +118,7 @@ if not st.session_state.authenticated:
             
             if submitted:
                 # Change "8888" to whatever 4-digit PIN you want!
-                if pin == "8888":
+                if pin == "0109":
                     st.session_state.authenticated = True
                     st.rerun()
                 else:
