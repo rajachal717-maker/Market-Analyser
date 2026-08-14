@@ -22,12 +22,10 @@ def init_db():
     conn = sqlite3.connect("market_data.db", check_same_thread=False)
     c = conn.cursor()
     
-    # Core Tables
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
     
-    # Trade Journal Log Table
     c.execute('''CREATE TABLE IF NOT EXISTS trade_journal (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     user_id INTEGER, 
@@ -39,7 +37,6 @@ def init_db():
                     total_value REAL
                 )''')
                 
-    # Price Alerts Table
     c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     user_id INTEGER, 
@@ -65,13 +62,8 @@ def get_or_create_default_user():
     return {"id": user[0], "email": user[1]}
 # =====================================================================
 
-# Page Configuration
-st.set_page_config(
-    page_title="Institutional Quant Terminal",
-    page_icon="✨",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+
+st.set_page_config(page_title="Institutional Quant Terminal", page_icon="✨", layout="wide", initial_sidebar_state="expanded")
 
 try:
     from ddgs import DDGS
@@ -82,7 +74,6 @@ except ImportError:
 if "user" not in st.session_state or not st.session_state.user:
     st.session_state.user = get_or_create_default_user()
 
-# --- CRYPTOGRAPHIC VAULT ---
 class SecurityVault:
     def __init__(self):
         if "vault_key" not in st.session_state:
@@ -96,41 +87,15 @@ class SecurityVault:
 
 vault = SecurityVault()
 
-# --- THEME CSS ---
 THEME_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html, body, [class*="css"], .stApp {
-    font-family: 'Inter', sans-serif;
-    background-color: #000000 !important;
-    color: #E3E3E3;
-}
+html, body, [class*="css"], .stApp { font-family: 'Inter', sans-serif; background-color: #000000 !important; color: #E3E3E3; }
 header { background-color: transparent !important; }
-[data-testid="stSidebar"] {
-    background-color: #0A0A0A !important;
-    border-right: 1px solid #1A1A1A;
-}
-.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea, .stNumberInput>div>div>input {
-    background-color: #121212 !important;
-    color: #FFFFFF !important;
-    border: 1px solid #2B2B2B !important;
-    border-radius: 8px !important;
-    padding: 10px 16px !important;
-}
-.stButton>button {
-    background-color: #2962FF;
-    color: #FFFFFF;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    padding: 0.5rem 1.2rem;
-}
-div[data-testid="metric-container"] {
-    background-color: #121212; 
-    border: 1px solid #2B2B2B; 
-    padding: 15px 20px;
-    border-radius: 12px;       
-}
+[data-testid="stSidebar"] { background-color: #0A0A0A !important; border-right: 1px solid #1A1A1A; }
+.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea, .stNumberInput>div>div>input { background-color: #121212 !important; color: #FFFFFF !important; border: 1px solid #2B2B2B !important; border-radius: 8px !important; padding: 10px 16px !important; }
+.stButton>button { background-color: #2962FF; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; padding: 0.5rem 1.2rem; }
+div[data-testid="metric-container"] { background-color: #121212; border: 1px solid #2B2B2B; padding: 15px 20px; border-radius: 12px; }
 [data-testid="stMetricLabel"] { color: #9AA0A6 !important; font-size: 12px !important; text-transform: uppercase; }
 [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 26px !important; font-weight: 600 !important; }
 </style>
@@ -142,31 +107,24 @@ if "nse_watchlist" not in st.session_state:
 if "bse_watchlist" not in st.session_state:
     st.session_state.bse_watchlist = ["RELIANCE", "INFY", "TCS"]
 
-# --- SIDEBAR NAVIGATION ---
 with st.sidebar:
     user_email = st.session_state.user.get("email", "Active User")
     user_initial = user_email[0].upper()
-
-    st.markdown(
-        f"""
+    st.markdown(f"""
         <div style="display: flex; align-items: center; padding: 12px 16px; background-color: #121212; border-radius: 12px; border: 1px solid #1E1E1E; margin-bottom: 24px;">
-            <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #2962FF; display: flex; justify-content: center; align-items: center; color: white; font-weight: 700; font-size: 16px; margin-right: 12px;">
-                {user_initial}
-            </div>
+            <div style="width: 36px; height: 36px; border-radius: 50%; background-color: #2962FF; display: flex; justify-content: center; align-items: center; color: white; font-weight: 700; font-size: 16px; margin-right: 12px;">{user_initial}</div>
             <div style="overflow: hidden;">
                 <div style="font-size: 11px; color: #9AA0A6; font-weight: 600; text-transform: uppercase;">Workspace</div>
                 <div style="font-size: 13px; color: #FFFFFF; font-weight: 500; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">{user_email}</div>
             </div>
         </div>
-        """,
-        unsafe_allow_html=True
-    )
+        """, unsafe_allow_html=True)
     
     selected_page = option_menu(
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Practice Wallet & Journal"],
         icons=["robot", "globe", "activity", "search", "wallet2"],
-        default_index=3,
+        default_index=0,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -175,73 +133,49 @@ with st.sidebar:
         }
     )
 
-# --- HEADER ---
 col_h1, col_h2 = st.columns([3, 2])
 with col_h1:
     st.markdown("<h2 style='margin-bottom: 4px;'>Institutional Intelligence Terminal</h2>", unsafe_allow_html=True)
     st.markdown(f"<p style='color: #9AA0A6; font-size: 14px;'>Active Module: <b>{selected_page}</b></p>", unsafe_allow_html=True)
 with col_h2:
-    st.markdown(
-        """
+    st.markdown("""
         <div style='text-align: right; padding-top: 16px; display: flex; gap: 8px; justify-content: flex-end;'>
             <span style='background-color: rgba(41, 98, 255, 0.1); color: #2962FF; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(41, 98, 255, 0.2);'>🔒 AES-256 SECURED</span>
             <span style='background-color: rgba(0, 230, 118, 0.1); color: #00E676; padding: 6px 12px; border-radius: 16px; font-size: 11px; font-weight: 600; border: 1px solid rgba(0, 230, 118, 0.2);'>● LIVE DB</span>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
 # ==========================================
 # MODULE ROUTER
 # ==========================================
 
- if selected_page == "AI Assistant":
+if selected_page == "AI Assistant":
     from langchain_community.utilities import SQLDatabase
     from langchain_community.agent_toolkits import create_sql_agent
-    from langchain_groq import ChatGroq
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. My neural net is now directly connected to your local portfolio database. How can I assist you?"}]
     
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. My neural net is now directly connected to your local portfolio database. Ask me about your cash balance or holdings."}]
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="✨" if message["role"] == "assistant" else "👤"):
             st.markdown(message["content"])
-            
-    if prompt := st.chat_input("Ask about your portfolio, trade history, or the markets..."):
+    if prompt := st.chat_input("Ask a quantitative or portfolio question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="👤"): 
-            st.markdown(prompt)
-            
+        with st.chat_message("user", avatar="👤"): st.markdown(prompt)
         with st.chat_message("assistant", avatar="✨"):
             with st.spinner("Accessing local database..."):
                 try:
                     api_key = os.environ.get("GROQ_API_KEY")
-                    if not api_key: 
-                        st.error("GROQ_API_KEY environment variable missing.")
+                    if not api_key: st.error("GROQ_API_KEY environment variable missing.")
                     else:
-                        # 1. Connect the AI directly to your SQLite file
                         db = SQLDatabase.from_uri("sqlite:///market_data.db")
-                        
-                        # 2. Initialize the Groq Engine
                         llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0, groq_api_key=api_key)
-                        
-                        # 3. Create the SQL Agent
                         agent_executor = create_sql_agent(llm, db=db, agent_type="zero-shot-react-description", verbose=True)
-                        
-                        # 4. Instruct the AI
-                        system_prompt = f"""
-                        You are J.A.R.V.I.S., an advanced quantitative trading assistant. 
-                        The user is asking: {prompt}
-                        If the question is about their portfolio, cash balance, or trade history, use the database to find the exact answer. 
-                        If it is a general market question, answer it normally. Keep answers professional and concise.
-                        """
-                        
+                        system_prompt = f"You are J.A.R.V.I.S., a quant assistant. The user asks: {prompt}. If about portfolio/cash, use the database. Otherwise, answer normally."
                         response_msg = agent_executor.run(system_prompt)
                         st.markdown(response_msg)
                         st.session_state.messages.append({"role": "assistant", "content": response_msg})
-                except Exception as e: 
-                    st.error(f"Database Connection Error: {e}")
+                except Exception as e: st.error(f"Database Connection Error: {e}")
 
 elif selected_page == "Web Intelligence":
     col_s1, col_s2 = st.columns([4, 1])
@@ -259,7 +193,6 @@ elif selected_page == "Web Intelligence":
                                 st.write(r.get('body', ''))
                                 st.markdown(f"[Source Link]({r.get('href', '#')})")
                 except Exception as e: st.error(f"Search error: {e}")
- 
 
 elif selected_page == "Live Market Feed":
     def get_yf_quote(symbol, exchange):
@@ -269,8 +202,7 @@ elif selected_page == "Live Market Feed":
         try:
             ticker = yf.Ticker(yf_ticker)
             curr, prev = ticker.fast_info.get('lastPrice'), ticker.fast_info.get('previousClose')
-            if curr and prev:
-                return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": round(((curr - prev) / prev) * 100, 2)}
+            if curr and prev: return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": round(((curr - prev) / prev) * 100, 2)}
         except: pass
         return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
@@ -293,12 +225,10 @@ elif selected_page == "Live Market Feed":
                     target_p = st.number_input("Target Price (₹)", value=float(quote['Last (₹)']))
                     if st.form_submit_button("Save Alert"):
                         c = db_conn.cursor()
-                        c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", 
-                                  (st.session_state.user['id'], search_ticker.upper(), target_p, "CROSS"))
+                        c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", (st.session_state.user['id'], search_ticker.upper(), target_p, "CROSS"))
                         db_conn.commit()
                         st.success(f"Alert set for {search_ticker.upper()} at ₹{target_p}!")
         else: st.error("Quote not found.")
-
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
     col_w_left, col_w_right = st.columns(2)
@@ -335,21 +265,18 @@ elif selected_page == "Screener & Diagnostics":
     if scan_btn or target_symbol:
         import yfinance as yf
         yf_target = target_symbol if ("." in target_symbol) else f"{target_symbol}.NS"
-        with st.spinner(f"Rendering Professional Charts for {target_symbol}..."):
+        with st.spinner(f"Rendering Charts for {target_symbol}..."):
             try:
                 ticker_obj = yf.Ticker(yf_target)
                 hist = ticker_obj.history(period="6mo")
-                
                 if not hist.empty:
                     hist['EMA20'] = hist['Close'].ewm(span=20).mean()
                     hist['EMA50'] = hist['Close'].ewm(span=50).mean()
-                    
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                     rs = gain / loss
                     hist['RSI'] = 100 - (100 / (1 + rs))
-                    
                     hist['BB_Mid'] = hist['Close'].rolling(window=20).mean()
                     hist['BB_Std'] = hist['Close'].rolling(window=20).std()
                     hist['BB_Upper'] = hist['BB_Mid'] + (hist['BB_Std'] * 2)
@@ -364,47 +291,25 @@ elif selected_page == "Screener & Diagnostics":
                     m1.metric("Current Price", f"₹{round(last_price, 2)}")
                     m2.metric("RSI (14)", f"{round(last_rsi, 2)}")
                     m3.metric("Trend Signal", trend_signal)
-                    
                     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
                     
-                    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                        vertical_spacing=0.03, row_heights=[0.75, 0.25])
-                    
-                    fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'],
-                                                 low=hist['Low'], close=hist['Close'], name='Price'), 
-                                  row=1, col=1)
-                    
+                    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.75, 0.25])
+                    fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'], name='Price'), row=1, col=1)
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA20'], line=dict(color='#00E676', width=1.5), name='EMA 20'), row=1, col=1)
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['EMA50'], line=dict(color='#FF1744', width=1.5), name='EMA 50'), row=1, col=1)
-                    
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Upper'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), name='Upper BB'), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Lower'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), 
-                                             fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)', name='Lower BB'), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['BB_Lower'], line=dict(color='rgba(255, 255, 255, 0.2)', width=1, dash='dot'), fill='tonexty', fillcolor='rgba(255, 255, 255, 0.05)', name='Lower BB'), row=1, col=1)
                     
                     colors = ['#00E676' if row['Close'] >= row['Open'] else '#FF1744' for _, row in hist.iterrows()]
                     fig.add_trace(go.Bar(x=hist.index, y=hist['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
                     
-                    fig.update_layout(
-                        template='plotly_dark',
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        plot_bgcolor='rgba(0,0,0,0)',
-                        xaxis_rangeslider_visible=False,
-                        height=650,
-                        margin=dict(l=0, r=0, t=10, b=0),
-                        showlegend=False,
-                        hovermode='x unified'
-                    )
-                    
+                    fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False, height=650, margin=dict(l=0, r=0, t=10, b=0), showlegend=False, hovermode='x unified')
                     fig.update_yaxes(title_text="Price (₹)", row=1, col=1, gridcolor='#1E1E1E')
                     fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor='#1E1E1E')
                     fig.update_xaxes(gridcolor='#1E1E1E')
-
                     st.plotly_chart(fig, use_container_width=True)
-
-                else: 
-                    st.error("Could not fetch ticker price history.")
-            except Exception as e: 
-                st.error(f"Error rendering charts: {e}")
+                else: st.error("Could not fetch ticker price history.")
+            except Exception as e: st.error(f"Error rendering charts: {e}")
 
 elif selected_page == "Practice Wallet & Journal":
     user_id = st.session_state.user['id']
@@ -440,8 +345,7 @@ elif selected_page == "Practice Wallet & Journal":
     net_worth = balance + total_holdings_val
     sharpe_ratio = round(1.42 + (portfolio_pnl / 100000), 2)  
 
-    st.markdown(
-        f"""
+    st.markdown(f"""
         <div style="display: flex; gap: 16px; margin-bottom: 24px;">
             <div style="flex: 1; background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #2B2B2B;">
                 <div style="font-size: 12px; color: #9AA0A6; text-transform: uppercase;">Total Net Worth</div>
@@ -456,8 +360,7 @@ elif selected_page == "Practice Wallet & Journal":
                 <div style="font-size: 28px; color: #2962FF; font-weight: 700;">{sharpe_ratio}</div>
             </div>
         </div>
-        """, unsafe_allow_html=True
-    )
+        """, unsafe_allow_html=True)
 
     col_trade, col_port = st.columns([1, 2])
     with col_trade:
