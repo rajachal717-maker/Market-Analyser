@@ -105,12 +105,11 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
     
-    # NEW TAB ADDED HERE
     selected_page = option_menu(
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal"],
         icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2"],
-        default_index=4,
+        default_index=3,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -131,10 +130,6 @@ with col_h2:
         </div>
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
-
-# ==========================================
-# MODULE ROUTER
-# ==========================================
 
 if selected_page == "AI Assistant":
     from langchain_community.utilities import SQLDatabase
@@ -242,7 +237,7 @@ elif selected_page == "Live Market Feed":
 
 elif selected_page == "Screener & Diagnostics":
     screen_col1, screen_col2 = st.columns([3, 1])
-    with screen_col1: target_symbol = st.text_input("Enter Ticker", value="VMART", placeholder="e.g. NOCIL").strip().upper()
+    with screen_col1: target_symbol = st.text_input("Enter Ticker", value="RELIANCE", placeholder="e.g. NOCIL").strip().upper()
     with screen_col2: scan_btn = st.button("Run Multi-Indicator Scan", width="stretch")
 
     if scan_btn or target_symbol:
@@ -292,11 +287,13 @@ elif selected_page == "Screener & Diagnostics":
                     fig.update_xaxes(gridcolor='#1E1E1E')
                     st.plotly_chart(fig, use_container_width=True)
 
+                    # =====================================================================
+                    # 🤖 MACHINE LEARNING: RANDOM FOREST INTRADAY PREDICTOR
+                    # =====================================================================
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
                         st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
                         ml_btn = st.button("Generate ML Forecast")
-                        
                         if ml_btn:
                             with st.spinner("Training ML Model..."):
                                 try:
@@ -307,16 +304,13 @@ elif selected_page == "Screener & Diagnostics":
                                         df['Lag1'] = df['Close'].shift(1)
                                         df['Lag2'] = df['Close'].shift(2)
                                         df.dropna(inplace=True)
-                                        
-                                        X = df[['Lag1', 'Lag2', 'Volume']]
-                                        y = df['Close']
+                                        X, y = df[['Lag1', 'Lag2', 'Volume']], df['Close']
                                         
                                         model = RandomForestRegressor(n_estimators=100, random_state=42)
                                         model.fit(X, y)
                                         
                                         future_steps = 25
-                                        last_close = df['Close'].iloc[-1]
-                                        curr_lag1, curr_lag2 = last_close, df['Lag1'].iloc[-1]
+                                        curr_lag1, curr_lag2 = df['Close'].iloc[-1], df['Lag1'].iloc[-1]
                                         avg_vol = df['Volume'].mean()
                                         
                                         predictions = []
@@ -328,34 +322,67 @@ elif selected_page == "Screener & Diagnostics":
                                         pred_fig = go.Figure()
                                         hist_plot = df.tail(50)
                                         pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
-                                        
                                         pred_x = np.arange(len(hist_plot) - 1, len(hist_plot) + future_steps)
                                         pred_y = [hist_plot['Close'].iloc[-1]] + predictions
                                         pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='ML Forecast', line=dict(color='#2962FF', width=3, dash='dash')))
                                         
                                         std_dev = df['Close'].tail(20).std()
-                                        upper_bound = [y + (std_dev * 1.5) for y in pred_y]
-                                        lower_bound = [y - (std_dev * 1.5) for y in pred_y]
-                                        
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=upper_bound, line=dict(color='rgba(41, 98, 255, 0.2)'), showlegend=False))
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=lower_bound, fill='tonexty', fillcolor='rgba(41, 98, 255, 0.1)', line=dict(color='rgba(41, 98, 255, 0.2)'), name='Confidence Zone'))
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y + (std_dev * 1.5) for y in pred_y], line=dict(color='rgba(41, 98, 255, 0.2)'), showlegend=False))
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y - (std_dev * 1.5) for y in pred_y], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.1)', line=dict(color='rgba(41, 98, 255, 0.2)'), name='Confidence Zone'))
                                         
                                         pred_fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, title=f"{target_symbol} Random Forest 15m Projection")
                                         st.plotly_chart(pred_fig, use_container_width=True)
-                                        
                                         st.success(f"Forecast Complete. Projected End Price: ₹{round(predictions[-1], 2)}")
                                     else:
                                         st.error("Not enough intraday data for this asset to train the model.")
                                 except Exception as e:
                                     st.error(f"ML Model Error: {e}")
+                    
+                    # =====================================================================
+                    # 📊 NEW: LIVE OPTIONS CHAIN SENTIMENT (PCR & IV)
+                    # =====================================================================
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    with st.expander("📊 Options Chain Sentiment (PCR & IV)", expanded=False):
+                        st.markdown(f"Extracting live NSE Options Derivatives data for **{target_symbol}**...")
+                        opt_btn = st.button("Analyze Derivatives Sentiment")
+                        
+                        if opt_btn:
+                            with st.spinner("Connecting to NSE..."):
+                                try:
+                                    from nsepython import option_chain
+                                    payload = option_chain(target_symbol)
+                                    
+                                    if payload and 'filtered' in payload:
+                                        ce_oi = payload['filtered']['CE']['totOI']
+                                        pe_oi = payload['filtered']['PE']['totOI']
+                                        
+                                        pcr = pe_oi / ce_oi if ce_oi > 0 else 0
+                                        
+                                        # Extract ATM Implied Volatility
+                                        data_list = payload['filtered']['data']
+                                        ce_ivs = [item['CE']['impliedVolatility'] for item in data_list if 'CE' in item and item['CE']['impliedVolatility'] > 0]
+                                        pe_ivs = [item['PE']['impliedVolatility'] for item in data_list if 'PE' in item and item['PE']['impliedVolatility'] > 0]
+                                        avg_iv = np.mean(ce_ivs + pe_ivs) if (ce_ivs or pe_ivs) else 0
+                                        
+                                        c1, c2 = st.columns(2)
+                                        with c1:
+                                            st.metric("Put-Call Ratio (PCR)", f"{pcr:.2f}")
+                                            if pcr > 1: st.success("📈 Bullish Sentiment (Puts > Calls)")
+                                            elif pcr < 0.7: st.error("📉 Bearish Sentiment (Calls > Puts)")
+                                            else: st.info("⚖️ Neutral Sentiment")
+                                            
+                                        with c2:
+                                            st.metric("Implied Volatility (IV)", f"{avg_iv:.2f}%")
+                                            st.caption("Higher IV indicates the market expects larger price swings.")
+                                            
+                                    else:
+                                        st.warning("No options data found. This stock may not be in the F&O segment.")
+                                except Exception as e:
+                                    st.error("Options Data Error: NSE often blocks automated cloud requests. Try running this locally on your machine.")
 
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
 
-
-# =====================================================================
-# 🛠️ NEW: AUTOMATED STRATEGY BACKTESTER
-# =====================================================================
 elif selected_page == "Strategy Backtester":
     st.markdown("##### ⚙️ Algorithmic Strategy Engine")
     st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Simulate EMA crossover strategies on historical data with strict risk management.</p>", unsafe_allow_html=True)
@@ -383,58 +410,46 @@ elif selected_page == "Strategy Backtester":
                 hist = yf.Ticker(yf_ticker).history(period=b_period)
                 
                 if len(hist) > slow_ema:
-                    # Calculate Technicals
                     hist['EMA_Fast'] = hist['Close'].ewm(span=fast_ema).mean()
                     hist['EMA_Slow'] = hist['Close'].ewm(span=slow_ema).mean()
-                    
                     delta = hist['Close'].diff()
                     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
                     loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
                     rs = gain / loss
                     hist['RSI'] = 100 - (100 / (1 + rs))
                     
-                    # Simulation Variables
                     in_position = False
                     entry_price = 0
                     trades = []
-                    capital = 100000.0  # Starting with ₹1,00,000
+                    capital = 100000.0  
                     equity_curve = []
                     
-                    # Loop through history
                     for i in range(1, len(hist)):
                         date = hist.index[i]
-                        close = hist['Close'].iloc[i]
-                        high = hist['High'].iloc[i]
-                        low = hist['Low'].iloc[i]
+                        close, high, low = hist['Close'].iloc[i], hist['High'].iloc[i], hist['Low'].iloc[i]
                         
-                        # 1. Check for Exits (if holding a position)
                         if in_position:
                             tp_price = entry_price * (1 + (tp_pct / 100))
                             sl_price = entry_price * (1 - (sl_pct / 100))
                             
                             if high >= tp_price:
-                                profit = tp_price - entry_price
-                                capital += (profit / entry_price) * capital
+                                capital += ((tp_price - entry_price) / entry_price) * capital
                                 trades.append({"Date": date, "Type": "WIN", "Return": tp_pct})
                                 in_position = False
                             elif low <= sl_price:
-                                loss = entry_price - sl_price
-                                capital -= (loss / entry_price) * capital
+                                capital -= ((entry_price - sl_price) / entry_price) * capital
                                 trades.append({"Date": date, "Type": "LOSS", "Return": -sl_pct})
                                 in_position = False
                         
-                        # 2. Check for Entries (if flat)
                         if not in_position:
                             crossover_up = (hist['EMA_Fast'].iloc[i] > hist['EMA_Slow'].iloc[i]) and (hist['EMA_Fast'].iloc[i-1] <= hist['EMA_Slow'].iloc[i-1])
                             rsi_cond = (hist['RSI'].iloc[i] < rsi_thresh) if use_rsi else True
-                            
                             if crossover_up and rsi_cond:
                                 in_position = True
                                 entry_price = close
                                 
                         equity_curve.append({"Date": date, "Capital": capital})
                         
-                    # Calculate Metrics
                     total_trades = len(trades)
                     wins = len([t for t in trades if t["Type"] == "WIN"])
                     win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
@@ -449,15 +464,10 @@ elif selected_page == "Strategy Backtester":
                     m3.metric("Final Capital (from ₹1L)", f"₹{capital:,.2f}")
                     m4.metric("Net ROI", f"{total_return:.2f}%", delta=f"{total_return:.2f}%")
                     
-                    # Plot Equity Curve
                     eq_df = pd.DataFrame(equity_curve)
                     if not eq_df.empty:
                         fig = px.line(eq_df, x="Date", y="Capital")
-                        fig.update_layout(
-                            title="Strategy Equity Growth Curve",
-                            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
-                            margin=dict(l=0, r=0, t=40, b=0), height=400
-                        )
+                        fig.update_layout(title="Strategy Equity Growth Curve", template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=40, b=0), height=400)
                         fig.update_traces(line=dict(color='#00E676', width=2))
                         fig.update_yaxes(title_text="Portfolio Value (₹)", gridcolor='#1E1E1E')
                         fig.update_xaxes(gridcolor='#1E1E1E')
