@@ -21,30 +21,14 @@ from langchain_groq import ChatGroq
 def init_db():
     conn = sqlite3.connect("market_data.db", check_same_thread=False)
     c = conn.cursor()
-    
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
-    
     c.execute('''CREATE TABLE IF NOT EXISTS trade_journal (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    user_id INTEGER, 
-                    timestamp TEXT, 
-                    ticker TEXT, 
-                    action TEXT, 
-                    quantity INTEGER, 
-                    price REAL, 
-                    total_value REAL
-                )''')
-                
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, timestamp TEXT, ticker TEXT, 
+                    action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    user_id INTEGER, 
-                    ticker TEXT, 
-                    target_price REAL, 
-                    condition TEXT
-                )''')
-                
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, target_price REAL, condition TEXT)''')
     conn.commit()
     return conn
 
@@ -60,8 +44,6 @@ def get_or_create_default_user():
         db_conn.commit()
         user = (1, 'quant@institutional.terminal')
     return {"id": user[0], "email": user[1]}
-# =====================================================================
-
 
 st.set_page_config(page_title="Institutional Quant Terminal", page_icon="✨", layout="wide", initial_sidebar_state="expanded")
 
@@ -124,7 +106,7 @@ with st.sidebar:
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Practice Wallet & Journal"],
         icons=["robot", "globe", "activity", "search", "wallet2"],
-        default_index=0,
+        default_index=3,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -145,10 +127,6 @@ with col_h2:
         </div>
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
-
-# ==========================================
-# MODULE ROUTER
-# ==========================================
 
 if selected_page == "AI Assistant":
     from langchain_community.utilities import SQLDatabase
@@ -303,11 +281,86 @@ elif selected_page == "Screener & Diagnostics":
                     colors = ['#00E676' if row['Close'] >= row['Open'] else '#FF1744' for _, row in hist.iterrows()]
                     fig.add_trace(go.Bar(x=hist.index, y=hist['Volume'], marker_color=colors, name='Volume'), row=2, col=1)
                     
-                    fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False, height=650, margin=dict(l=0, r=0, t=10, b=0), showlegend=False, hovermode='x unified')
+                    fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis_rangeslider_visible=False, height=500, margin=dict(l=0, r=0, t=10, b=0), showlegend=False, hovermode='x unified')
                     fig.update_yaxes(title_text="Price (₹)", row=1, col=1, gridcolor='#1E1E1E')
                     fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor='#1E1E1E')
                     fig.update_xaxes(gridcolor='#1E1E1E')
                     st.plotly_chart(fig, use_container_width=True)
+
+                    # =====================================================================
+                    # 🤖 MACHINE LEARNING: RANDOM FOREST INTRADAY PREDICTOR
+                    # =====================================================================
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
+                        st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
+                        ml_btn = st.button("Generate ML Forecast")
+                        
+                        if ml_btn:
+                            with st.spinner("Training ML Model..."):
+                                try:
+                                    from sklearn.ensemble import RandomForestRegressor
+                                    
+                                    # Fetch 5 days of 15-minute intraday data
+                                    intra_data = ticker_obj.history(period="5d", interval="15m")
+                                    if not intra_data.empty and len(intra_data) > 20:
+                                        df = intra_data[['Close', 'Volume']].copy()
+                                        df['Lag1'] = df['Close'].shift(1)
+                                        df['Lag2'] = df['Close'].shift(2)
+                                        df.dropna(inplace=True)
+                                        
+                                        X = df[['Lag1', 'Lag2', 'Volume']]
+                                        y = df['Close']
+                                        
+                                        # Train the Model
+                                        model = RandomForestRegressor(n_estimators=100, random_state=42)
+                                        model.fit(X, y)
+                                        
+                                        # Predict next 25 intervals (~1 trading day)
+                                        future_steps = 25
+                                        last_close = df['Close'].iloc[-1]
+                                        curr_lag1 = last_close
+                                        curr_lag2 = df['Lag1'].iloc[-1]
+                                        avg_vol = df['Volume'].mean()
+                                        
+                                        predictions = []
+                                        for _ in range(future_steps):
+                                            pred = model.predict([[curr_lag1, curr_lag2, avg_vol]])[0]
+                                            predictions.append(pred)
+                                            curr_lag2 = curr_lag1
+                                            curr_lag1 = pred
+                                            
+                                        # Plot Results
+                                        pred_fig = go.Figure()
+                                        
+                                        # Plot historical last 50 points
+                                        hist_plot = df.tail(50)
+                                        pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], 
+                                                                    mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
+                                        
+                                        # Plot predictions
+                                        pred_x = np.arange(len(hist_plot) - 1, len(hist_plot) + future_steps)
+                                        pred_y = [hist_plot['Close'].iloc[-1]] + predictions
+                                        
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='ML Forecast', 
+                                                                    line=dict(color='#2962FF', width=3, dash='dash')))
+                                        
+                                        # Calculate Confidence Interval Ribbon
+                                        std_dev = df['Close'].tail(20).std()
+                                        upper_bound = [y + (std_dev * 1.5) for y in pred_y]
+                                        lower_bound = [y - (std_dev * 1.5) for y in pred_y]
+                                        
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=upper_bound, line=dict(color='rgba(41, 98, 255, 0.2)'), showlegend=False))
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=lower_bound, fill='tonexty', fillcolor='rgba(41, 98, 255, 0.1)', line=dict(color='rgba(41, 98, 255, 0.2)'), name='Confidence Zone'))
+                                        
+                                        pred_fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, title=f"{target_symbol} Random Forest 15m Projection")
+                                        st.plotly_chart(pred_fig, use_container_width=True)
+                                        
+                                        st.success(f"Forecast Complete. Projected End Price: ₹{round(predictions[-1], 2)}")
+                                    else:
+                                        st.error("Not enough intraday data for this asset to train the model.")
+                                except Exception as e:
+                                    st.error(f"ML Model Error: {e}")
+
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
 
