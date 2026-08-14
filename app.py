@@ -196,26 +196,52 @@ st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe
 # MODULE ROUTER
 # ==========================================
 
-if selected_page == "AI Assistant":
+ if selected_page == "AI Assistant":
+    from langchain_community.utilities import SQLDatabase
+    from langchain_community.agent_toolkits import create_sql_agent
+    from langchain_groq import ChatGroq
+
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. Ready for quantitative queries."}]
+        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. My neural net is now directly connected to your local portfolio database. How can I assist you?"}]
+    
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="✨" if message["role"] == "assistant" else "👤"):
             st.markdown(message["content"])
-    if prompt := st.chat_input("Ask a quantitative or market question..."):
+            
+    if prompt := st.chat_input("Ask about your portfolio, trade history, or the markets..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="👤"): st.markdown(prompt)
+        with st.chat_message("user", avatar="👤"): 
+            st.markdown(prompt)
+            
         with st.chat_message("assistant", avatar="✨"):
-            with st.spinner("Thinking..."):
+            with st.spinner("Accessing local database..."):
                 try:
                     api_key = os.environ.get("GROQ_API_KEY")
-                    if not api_key: st.error("GROQ_API_KEY environment variable missing.")
+                    if not api_key: 
+                        st.error("GROQ_API_KEY environment variable missing.")
                     else:
-                        chat_llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.1, groq_api_key=api_key)
-                        response_msg = chat_llm.invoke([SystemMessage(content="You are J.A.R.V.I.S., a quant trading assistant."), HumanMessage(content=prompt)]).content
+                        # 1. Connect the AI directly to your SQLite file
+                        db = SQLDatabase.from_uri("sqlite:///market_data.db")
+                        
+                        # 2. Initialize the Groq Engine
+                        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0, groq_api_key=api_key)
+                        
+                        # 3. Create the SQL Agent
+                        agent_executor = create_sql_agent(llm, db=db, agent_type="zero-shot-react-description", verbose=True)
+                        
+                        # 4. Instruct the AI
+                        system_prompt = f"""
+                        You are J.A.R.V.I.S., an advanced quantitative trading assistant. 
+                        The user is asking: {prompt}
+                        If the question is about their portfolio, cash balance, or trade history, use the database to find the exact answer. 
+                        If it is a general market question, answer it normally. Keep answers professional and concise.
+                        """
+                        
+                        response_msg = agent_executor.run(system_prompt)
                         st.markdown(response_msg)
                         st.session_state.messages.append({"role": "assistant", "content": response_msg})
-                except Exception as e: st.error(f"Error: {e}")
+                except Exception as e: 
+                    st.error(f"Database Connection Error: {e}")
 
 elif selected_page == "Web Intelligence":
     col_s1, col_s2 = st.columns([4, 1])
@@ -233,6 +259,7 @@ elif selected_page == "Web Intelligence":
                                 st.write(r.get('body', ''))
                                 st.markdown(f"[Source Link]({r.get('href', '#')})")
                 except Exception as e: st.error(f"Search error: {e}")
+ 
 
 elif selected_page == "Live Market Feed":
     def get_yf_quote(symbol, exchange):
