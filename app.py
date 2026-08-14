@@ -19,7 +19,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 
 # =====================================================================
-# 🗄️ 1. ADVANCED PROFESSIONAL SQLITE BACKEND
+# 🗄️ ADVANCED PROFESSIONAL SQLITE BACKEND
 # =====================================================================
 def init_db():
     conn = sqlite3.connect("market_data.db", check_same_thread=False)
@@ -47,6 +47,19 @@ def get_or_create_default_user():
         db_conn.commit()
         user = (1, 'quant@institutional.terminal')
     return {"id": user[0], "email": user[1]}
+
+# =====================================================================
+# 🔄 NEW: INDEX ROUTING ENGINE
+# =====================================================================
+def format_ticker(symbol, exchange="NSE"):
+    symbol = symbol.strip().upper()
+    # Route Indian Indices to correct Yahoo Finance hidden tickers
+    if symbol == "NIFTY": return "^NSEI"
+    if symbol == "BANKNIFTY": return "^NSEBANK"
+    if symbol == "SENSEX": return "^BSESN"
+    # Return normal stocks with exchange extensions
+    if "." in symbol or "^" in symbol: return symbol
+    return f"{symbol}.NS" if exchange == "NSE" else f"{symbol}.BO"
 
 st.set_page_config(page_title="Institutional Quant Terminal", page_icon="✨", layout="wide", initial_sidebar_state="expanded")
 
@@ -87,10 +100,11 @@ div[data-testid="metric-container"] { background-color: #121212; border: 1px sol
 """
 st.markdown(THEME_CSS, unsafe_allow_html=True)
 
+# Updated Default Watchlists to include Indices
 if "nse_watchlist" not in st.session_state:
-    st.session_state.nse_watchlist = ["VMART", "NOCIL", "RELIANCE", "TCS", "INFY"]
+    st.session_state.nse_watchlist = ["NIFTY", "BANKNIFTY", "VMART", "NOCIL", "RELIANCE"]
 if "bse_watchlist" not in st.session_state:
-    st.session_state.bse_watchlist = ["RELIANCE", "INFY", "TCS"]
+    st.session_state.bse_watchlist = ["SENSEX", "RELIANCE", "INFY", "TCS"]
 
 with st.sidebar:
     user_email = st.session_state.user.get("email", "Active User")
@@ -178,18 +192,17 @@ elif selected_page == "Web Intelligence":
 elif selected_page == "Live Market Feed":
     def get_yf_quote(symbol, exchange):
         import yfinance as yf
-        symbol = symbol.strip().upper()
-        yf_ticker = f"{symbol}.NS" if exchange == "NSE" else f"{symbol}.BO"
+        yf_ticker = format_ticker(symbol, exchange)
         try:
             ticker = yf.Ticker(yf_ticker)
             curr, prev = ticker.fast_info.get('lastPrice'), ticker.fast_info.get('previousClose')
-            if curr and prev: return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": round(((curr - prev) / prev) * 100, 2)}
+            if curr and prev: return {"Symbol": symbol.strip().upper(), "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": round(((curr - prev) / prev) * 100, 2)}
         except: pass
-        return {"Symbol": symbol, "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
+        return {"Symbol": symbol.strip().upper(), "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
     st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>🔍 Quick Quote & Alert Setter</div>", unsafe_allow_html=True)
     col_sq1, col_sq2, col_sq3 = st.columns([3, 1, 1])
-    with col_sq1: search_ticker = st.text_input("Ticker", placeholder="e.g. ZOMATO", label_visibility="collapsed")
+    with col_sq1: search_ticker = st.text_input("Ticker", placeholder="e.g. NIFTY, ZOMATO", label_visibility="collapsed")
     with col_sq2: search_exchange = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
     with col_sq3: search_quote_btn = st.button("Get Quote", width="stretch")
 
@@ -216,7 +229,7 @@ elif selected_page == "Live Market Feed":
     with col_w_left:
         st.markdown("##### 📋 Watchlist Manager")
         with st.form("watchlist_form"):
-            nse_input = st.text_area("NSE Tickers", value=", ".join(st.session_state.nse_watchlist))
+            nse_input = st.text_area("NSE Tickers (Include NIFTY, BANKNIFTY)", value=", ".join(st.session_state.nse_watchlist))
             if st.form_submit_button("Update Watchlist"):
                 st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
                 st.rerun()
@@ -237,12 +250,13 @@ elif selected_page == "Live Market Feed":
 
 elif selected_page == "Screener & Diagnostics":
     screen_col1, screen_col2 = st.columns([3, 1])
-    with screen_col1: target_symbol = st.text_input("Enter Ticker", value="RELIANCE", placeholder="e.g. NOCIL").strip().upper()
+    with screen_col1: target_symbol = st.text_input("Enter Ticker", value="NIFTY", placeholder="e.g. BANKNIFTY, NOCIL").strip().upper()
     with screen_col2: scan_btn = st.button("Run Multi-Indicator Scan", width="stretch")
 
     if scan_btn or target_symbol:
         import yfinance as yf
-        yf_target = target_symbol if ("." in target_symbol) else f"{target_symbol}.NS"
+        yf_target = format_ticker(target_symbol)
+        
         with st.spinner(f"Rendering Charts for {target_symbol}..."):
             try:
                 ticker_obj = yf.Ticker(yf_target)
@@ -287,9 +301,7 @@ elif selected_page == "Screener & Diagnostics":
                     fig.update_xaxes(gridcolor='#1E1E1E')
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # =====================================================================
-                    # 🤖 MACHINE LEARNING: RANDOM FOREST INTRADAY PREDICTOR
-                    # =====================================================================
+                    # 🤖 MACHINE LEARNING
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
                         st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
@@ -338,9 +350,7 @@ elif selected_page == "Screener & Diagnostics":
                                 except Exception as e:
                                     st.error(f"ML Model Error: {e}")
                     
-                    # =====================================================================
-                    # 📊 NEW: LIVE OPTIONS CHAIN SENTIMENT (PCR & IV)
-                    # =====================================================================
+                    # 📊 LIVE OPTIONS CHAIN SENTIMENT
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("📊 Options Chain Sentiment (PCR & IV)", expanded=False):
                         st.markdown(f"Extracting live NSE Options Derivatives data for **{target_symbol}**...")
@@ -350,7 +360,8 @@ elif selected_page == "Screener & Diagnostics":
                             with st.spinner("Connecting to NSE..."):
                                 try:
                                     from nsepython import option_chain
-                                    payload = option_chain(target_symbol)
+                                    # Use original user string for options because nsepython likes "NIFTY"
+                                    payload = option_chain(target_symbol) 
                                     
                                     if payload and 'filtered' in payload:
                                         ce_oi = payload['filtered']['CE']['totOI']
@@ -358,7 +369,6 @@ elif selected_page == "Screener & Diagnostics":
                                         
                                         pcr = pe_oi / ce_oi if ce_oi > 0 else 0
                                         
-                                        # Extract ATM Implied Volatility
                                         data_list = payload['filtered']['data']
                                         ce_ivs = [item['CE']['impliedVolatility'] for item in data_list if 'CE' in item and item['CE']['impliedVolatility'] > 0]
                                         pe_ivs = [item['PE']['impliedVolatility'] for item in data_list if 'PE' in item and item['PE']['impliedVolatility'] > 0]
@@ -376,9 +386,9 @@ elif selected_page == "Screener & Diagnostics":
                                             st.caption("Higher IV indicates the market expects larger price swings.")
                                             
                                     else:
-                                        st.warning("No options data found. This stock may not be in the F&O segment.")
+                                        st.warning(f"No options data found for {target_symbol}. This stock is likely cash-market only.")
                                 except Exception as e:
-                                    st.error("Options Data Error: NSE often blocks automated cloud requests. Try running this locally on your machine.")
+                                    st.error(f"Options Data Error: {e}")
 
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
@@ -389,7 +399,7 @@ elif selected_page == "Strategy Backtester":
     
     with st.form("backtest_config"):
         col_b1, col_b2, col_b3, col_b4 = st.columns(4)
-        with col_b1: b_ticker = st.text_input("Ticker", value="VMART").upper()
+        with col_b1: b_ticker = st.text_input("Ticker", value="BANKNIFTY").upper()
         with col_b2: b_period = st.selectbox("Historical Data", ["1y", "2y", "5y"])
         with col_b3: fast_ema = st.number_input("Fast EMA", value=20, min_value=1)
         with col_b4: slow_ema = st.number_input("Slow EMA", value=50, min_value=1)
@@ -406,7 +416,7 @@ elif selected_page == "Strategy Backtester":
         with st.spinner(f"Simulating trades on {b_ticker} over {b_period}..."):
             try:
                 import yfinance as yf
-                yf_ticker = b_ticker if "." in b_ticker else f"{b_ticker}.NS"
+                yf_ticker = format_ticker(b_ticker)
                 hist = yf.Ticker(yf_ticker).history(period=b_period)
                 
                 if len(hist) > slow_ema:
@@ -503,7 +513,8 @@ elif selected_page == "Practice Wallet & Journal":
     import yfinance as yf
     for h in holdings:
         try:
-            lp = yf.Ticker(f"{h['ticker']}.NS").fast_info.get('lastPrice', h['avg_price'])
+            yf_tick = format_ticker(h['ticker'])
+            lp = yf.Ticker(yf_tick).fast_info.get('lastPrice', h['avg_price'])
             total_holdings_val += h['quantity'] * lp
             portfolio_pnl += (lp - h['avg_price']) * h['quantity']
         except: pass
@@ -539,7 +550,8 @@ elif selected_page == "Practice Wallet & Journal":
             
             if st.form_submit_button("Submit Trade", width="stretch") and t_ticker:
                 try:
-                    price = yf.Ticker(f"{t_ticker}.NS" if t_exch=="NSE" else f"{t_ticker}.BO").fast_info.get('lastPrice')
+                    yf_tick = format_ticker(t_ticker, t_exch)
+                    price = yf.Ticker(yf_tick).fast_info.get('lastPrice')
                     if not price: st.error("Invalid ticker.")
                     else:
                         cost = price * t_qty
@@ -585,7 +597,8 @@ elif selected_page == "Practice Wallet & Journal":
         else:
             pdata = []
             for h in holdings:
-                lp = yf.Ticker(f"{h['ticker']}.NS").fast_info.get('lastPrice', h['avg_price'])
+                yf_tick = format_ticker(h['ticker'])
+                lp = yf.Ticker(yf_tick).fast_info.get('lastPrice', h['avg_price'])
                 pdata.append({"Ticker": h['ticker'], "Qty": h['quantity'], "Avg Buy": round(h['avg_price'], 2), "Live": round(lp, 2), "P&L (₹)": round((lp - h['avg_price'])*h['quantity'], 2)})
             st.dataframe(pd.DataFrame(pdata), width="stretch", hide_index=True)
 
