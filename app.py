@@ -1,5 +1,6 @@
 import os
 import io
+import shutil
 import secrets
 import time
 import asyncio
@@ -37,6 +38,39 @@ def init_db():
 
 db_conn = init_db()
 
+# =====================================================================
+# 🛡️ NEW: AUTOMATED SHADOW BACKUP ENGINE
+# =====================================================================
+def create_shadow_backup():
+    db_file = "market_data.db"
+    backup_dir = "backups"
+    
+    # Only proceed if the main database actually exists
+    if os.path.exists(db_file):
+        # Create the backups folder if it doesn't exist
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+            
+        # Create today's backup filename (e.g., market_data_2026-08-14.db)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        backup_filename = f"market_data_{today_str}.db"
+        backup_path = os.path.join(backup_dir, backup_filename)
+        
+        # If we haven't backed up today, create the clone
+        if not os.path.exists(backup_path):
+            shutil.copy2(db_file, backup_path)
+            print(f"✅ Shadow Backup Created: {backup_filename}")
+            
+            # Prune old backups (Keep only the last 7 days to save space)
+            all_backups = sorted([f for f in os.listdir(backup_dir) if f.endswith(".db")])
+            if len(all_backups) > 7:
+                oldest_backup = all_backups[0]
+                os.remove(os.path.join(backup_dir, oldest_backup))
+                print(f"🗑️ Pruned old backup: {oldest_backup}")
+
+# Run the backup engine silently every time the app starts
+create_shadow_backup()
+
 def get_or_create_default_user():
     c = db_conn.cursor()
     c.execute("SELECT id, email FROM users WHERE id = 1")
@@ -48,16 +82,11 @@ def get_or_create_default_user():
         user = (1, 'quant@institutional.terminal')
     return {"id": user[0], "email": user[1]}
 
-# =====================================================================
-# 🔄 NEW: INDEX ROUTING ENGINE
-# =====================================================================
 def format_ticker(symbol, exchange="NSE"):
     symbol = symbol.strip().upper()
-    # Route Indian Indices to correct Yahoo Finance hidden tickers
     if symbol == "NIFTY": return "^NSEI"
     if symbol == "BANKNIFTY": return "^NSEBANK"
     if symbol == "SENSEX": return "^BSESN"
-    # Return normal stocks with exchange extensions
     if "." in symbol or "^" in symbol: return symbol
     return f"{symbol}.NS" if exchange == "NSE" else f"{symbol}.BO"
 
@@ -100,7 +129,6 @@ div[data-testid="metric-container"] { background-color: #121212; border: 1px sol
 """
 st.markdown(THEME_CSS, unsafe_allow_html=True)
 
-# Updated Default Watchlists to include Indices
 if "nse_watchlist" not in st.session_state:
     st.session_state.nse_watchlist = ["NIFTY", "BANKNIFTY", "VMART", "NOCIL", "RELIANCE"]
 if "bse_watchlist" not in st.session_state:
@@ -123,7 +151,7 @@ with st.sidebar:
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal"],
         icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2"],
-        default_index=3,
+        default_index=5,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -301,7 +329,6 @@ elif selected_page == "Screener & Diagnostics":
                     fig.update_xaxes(gridcolor='#1E1E1E')
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # 🤖 MACHINE LEARNING
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
                         st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
@@ -350,23 +377,18 @@ elif selected_page == "Screener & Diagnostics":
                                 except Exception as e:
                                     st.error(f"ML Model Error: {e}")
                     
-                    # 📊 LIVE OPTIONS CHAIN SENTIMENT
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("📊 Options Chain Sentiment (PCR & IV)", expanded=False):
                         st.markdown(f"Extracting live NSE Options Derivatives data for **{target_symbol}**...")
                         opt_btn = st.button("Analyze Derivatives Sentiment")
-                        
                         if opt_btn:
                             with st.spinner("Connecting to NSE..."):
                                 try:
                                     from nsepython import option_chain
-                                    # Use original user string for options because nsepython likes "NIFTY"
                                     payload = option_chain(target_symbol) 
-                                    
                                     if payload and 'filtered' in payload:
                                         ce_oi = payload['filtered']['CE']['totOI']
                                         pe_oi = payload['filtered']['PE']['totOI']
-                                        
                                         pcr = pe_oi / ce_oi if ce_oi > 0 else 0
                                         
                                         data_list = payload['filtered']['data']
@@ -380,11 +402,9 @@ elif selected_page == "Screener & Diagnostics":
                                             if pcr > 1: st.success("📈 Bullish Sentiment (Puts > Calls)")
                                             elif pcr < 0.7: st.error("📉 Bearish Sentiment (Calls > Puts)")
                                             else: st.info("⚖️ Neutral Sentiment")
-                                            
                                         with c2:
                                             st.metric("Implied Volatility (IV)", f"{avg_iv:.2f}%")
                                             st.caption("Higher IV indicates the market expects larger price swings.")
-                                            
                                     else:
                                         st.warning(f"No options data found for {target_symbol}. This stock is likely cash-market only.")
                                 except Exception as e:
@@ -441,7 +461,6 @@ elif selected_page == "Strategy Backtester":
                         if in_position:
                             tp_price = entry_price * (1 + (tp_pct / 100))
                             sl_price = entry_price * (1 - (sl_pct / 100))
-                            
                             if high >= tp_price:
                                 capital += ((tp_price - entry_price) / entry_price) * capital
                                 trades.append({"Date": date, "Type": "WIN", "Return": tp_pct})
