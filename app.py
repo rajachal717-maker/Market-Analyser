@@ -229,7 +229,7 @@ if selected_page == "AI Assistant":
     from langchain_community.agent_toolkits import create_sql_agent
     
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. My neural net is now directly connected to your local portfolio database. Ask me about your cash balance or holdings."}]
+        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. My neural net is connected to your database. Ask me about your portfolio or cash."}]
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="✨" if message["role"] == "assistant" else "👤"):
             st.markdown(message["content"])
@@ -243,13 +243,25 @@ if selected_page == "AI Assistant":
                     if not api_key: st.error("GROQ_API_KEY environment variable missing.")
                     else:
                         db = SQLDatabase.from_uri("sqlite:///market_data.db")
+                        # Low temperature and lightweight model
                         llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0, groq_api_key=api_key)
-                        agent_executor = create_sql_agent(llm, db=db, agent_type="zero-shot-react-description", verbose=True)
-                        system_prompt = f"You are J.A.R.V.I.S., a quant assistant. The user asks: {prompt}. If about portfolio/cash, use the database. Otherwise, answer normally."
-                        response_msg = agent_executor.run(system_prompt)
+                        
+                        # Added top_k and max_iterations to heavily reduce token burn
+                        agent_executor = create_sql_agent(
+                            llm, 
+                            db=db, 
+                            agent_type="zero-shot-react-description", 
+                            verbose=False,
+                            max_iterations=3,
+                            top_k=5
+                        )
+                        
+                        response_msg = agent_executor.run(prompt)
                         st.markdown(response_msg)
                         st.session_state.messages.append({"role": "assistant", "content": response_msg})
-                except Exception as e: st.error(f"Database Connection Error: {e}")
+                except Exception as e: 
+                    st.error(f"Rate limit hit or connection error. Please wait 5 seconds and try again. ({e})")
+
 
 elif selected_page == "Web Intelligence":
     col_s1, col_s2 = st.columns([4, 1])
