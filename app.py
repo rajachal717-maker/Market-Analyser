@@ -14,6 +14,9 @@ from streamlit_option_menu import option_menu
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 
 # =====================================================================
 # 🗄️ 1. ADVANCED PROFESSIONAL SQLITE BACKEND
@@ -102,11 +105,12 @@ with st.sidebar:
         </div>
         """, unsafe_allow_html=True)
     
+    # NEW TAB ADDED HERE
     selected_page = option_menu(
         menu_title=None,
-        options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Practice Wallet & Journal"],
-        icons=["robot", "globe", "activity", "search", "wallet2"],
-        default_index=3,
+        options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal"],
+        icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2"],
+        default_index=4,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -127,6 +131,10 @@ with col_h2:
         </div>
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
+
+# ==========================================
+# MODULE ROUTER
+# ==========================================
 
 if selected_page == "AI Assistant":
     from langchain_community.utilities import SQLDatabase
@@ -233,9 +241,6 @@ elif selected_page == "Live Market Feed":
                     st.rerun()
 
 elif selected_page == "Screener & Diagnostics":
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-    
     screen_col1, screen_col2 = st.columns([3, 1])
     with screen_col1: target_symbol = st.text_input("Enter Ticker", value="VMART", placeholder="e.g. NOCIL").strip().upper()
     with screen_col2: scan_btn = st.button("Run Multi-Indicator Scan", width="stretch")
@@ -287,9 +292,6 @@ elif selected_page == "Screener & Diagnostics":
                     fig.update_xaxes(gridcolor='#1E1E1E')
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # =====================================================================
-                    # 🤖 MACHINE LEARNING: RANDOM FOREST INTRADAY PREDICTOR
-                    # =====================================================================
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
                         st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
@@ -299,8 +301,6 @@ elif selected_page == "Screener & Diagnostics":
                             with st.spinner("Training ML Model..."):
                                 try:
                                     from sklearn.ensemble import RandomForestRegressor
-                                    
-                                    # Fetch 5 days of 15-minute intraday data
                                     intra_data = ticker_obj.history(period="5d", interval="15m")
                                     if not intra_data.empty and len(intra_data) > 20:
                                         df = intra_data[['Close', 'Volume']].copy()
@@ -311,40 +311,28 @@ elif selected_page == "Screener & Diagnostics":
                                         X = df[['Lag1', 'Lag2', 'Volume']]
                                         y = df['Close']
                                         
-                                        # Train the Model
                                         model = RandomForestRegressor(n_estimators=100, random_state=42)
                                         model.fit(X, y)
                                         
-                                        # Predict next 25 intervals (~1 trading day)
                                         future_steps = 25
                                         last_close = df['Close'].iloc[-1]
-                                        curr_lag1 = last_close
-                                        curr_lag2 = df['Lag1'].iloc[-1]
+                                        curr_lag1, curr_lag2 = last_close, df['Lag1'].iloc[-1]
                                         avg_vol = df['Volume'].mean()
                                         
                                         predictions = []
                                         for _ in range(future_steps):
                                             pred = model.predict([[curr_lag1, curr_lag2, avg_vol]])[0]
                                             predictions.append(pred)
-                                            curr_lag2 = curr_lag1
-                                            curr_lag1 = pred
+                                            curr_lag2, curr_lag1 = curr_lag1, pred
                                             
-                                        # Plot Results
                                         pred_fig = go.Figure()
-                                        
-                                        # Plot historical last 50 points
                                         hist_plot = df.tail(50)
-                                        pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], 
-                                                                    mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
+                                        pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
                                         
-                                        # Plot predictions
                                         pred_x = np.arange(len(hist_plot) - 1, len(hist_plot) + future_steps)
                                         pred_y = [hist_plot['Close'].iloc[-1]] + predictions
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='ML Forecast', line=dict(color='#2962FF', width=3, dash='dash')))
                                         
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='ML Forecast', 
-                                                                    line=dict(color='#2962FF', width=3, dash='dash')))
-                                        
-                                        # Calculate Confidence Interval Ribbon
                                         std_dev = df['Close'].tail(20).std()
                                         upper_bound = [y + (std_dev * 1.5) for y in pred_y]
                                         lower_bound = [y - (std_dev * 1.5) for y in pred_y]
@@ -363,6 +351,121 @@ elif selected_page == "Screener & Diagnostics":
 
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
+
+
+# =====================================================================
+# 🛠️ NEW: AUTOMATED STRATEGY BACKTESTER
+# =====================================================================
+elif selected_page == "Strategy Backtester":
+    st.markdown("##### ⚙️ Algorithmic Strategy Engine")
+    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Simulate EMA crossover strategies on historical data with strict risk management.</p>", unsafe_allow_html=True)
+    
+    with st.form("backtest_config"):
+        col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+        with col_b1: b_ticker = st.text_input("Ticker", value="VMART").upper()
+        with col_b2: b_period = st.selectbox("Historical Data", ["1y", "2y", "5y"])
+        with col_b3: fast_ema = st.number_input("Fast EMA", value=20, min_value=1)
+        with col_b4: slow_ema = st.number_input("Slow EMA", value=50, min_value=1)
+        
+        col_b5, col_b6, col_b7, col_b8 = st.columns(4)
+        with col_b5: use_rsi = st.checkbox("Require Oversold RSI?", value=False)
+        with col_b6: rsi_thresh = st.number_input("Buy if RSI <", value=40, min_value=10, max_value=90)
+        with col_b7: tp_pct = st.number_input("Take Profit (%)", value=5.0, step=0.5)
+        with col_b8: sl_pct = st.number_input("Stop Loss (%)", value=2.0, step=0.5)
+        
+        run_backtest = st.form_submit_button("Run 1000x Trade Simulation", width="stretch")
+        
+    if run_backtest and b_ticker:
+        with st.spinner(f"Simulating trades on {b_ticker} over {b_period}..."):
+            try:
+                import yfinance as yf
+                yf_ticker = b_ticker if "." in b_ticker else f"{b_ticker}.NS"
+                hist = yf.Ticker(yf_ticker).history(period=b_period)
+                
+                if len(hist) > slow_ema:
+                    # Calculate Technicals
+                    hist['EMA_Fast'] = hist['Close'].ewm(span=fast_ema).mean()
+                    hist['EMA_Slow'] = hist['Close'].ewm(span=slow_ema).mean()
+                    
+                    delta = hist['Close'].diff()
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss
+                    hist['RSI'] = 100 - (100 / (1 + rs))
+                    
+                    # Simulation Variables
+                    in_position = False
+                    entry_price = 0
+                    trades = []
+                    capital = 100000.0  # Starting with ₹1,00,000
+                    equity_curve = []
+                    
+                    # Loop through history
+                    for i in range(1, len(hist)):
+                        date = hist.index[i]
+                        close = hist['Close'].iloc[i]
+                        high = hist['High'].iloc[i]
+                        low = hist['Low'].iloc[i]
+                        
+                        # 1. Check for Exits (if holding a position)
+                        if in_position:
+                            tp_price = entry_price * (1 + (tp_pct / 100))
+                            sl_price = entry_price * (1 - (sl_pct / 100))
+                            
+                            if high >= tp_price:
+                                profit = tp_price - entry_price
+                                capital += (profit / entry_price) * capital
+                                trades.append({"Date": date, "Type": "WIN", "Return": tp_pct})
+                                in_position = False
+                            elif low <= sl_price:
+                                loss = entry_price - sl_price
+                                capital -= (loss / entry_price) * capital
+                                trades.append({"Date": date, "Type": "LOSS", "Return": -sl_pct})
+                                in_position = False
+                        
+                        # 2. Check for Entries (if flat)
+                        if not in_position:
+                            crossover_up = (hist['EMA_Fast'].iloc[i] > hist['EMA_Slow'].iloc[i]) and (hist['EMA_Fast'].iloc[i-1] <= hist['EMA_Slow'].iloc[i-1])
+                            rsi_cond = (hist['RSI'].iloc[i] < rsi_thresh) if use_rsi else True
+                            
+                            if crossover_up and rsi_cond:
+                                in_position = True
+                                entry_price = close
+                                
+                        equity_curve.append({"Date": date, "Capital": capital})
+                        
+                    # Calculate Metrics
+                    total_trades = len(trades)
+                    wins = len([t for t in trades if t["Type"] == "WIN"])
+                    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+                    total_return = ((capital - 100000) / 100000) * 100
+                    
+                    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
+                    st.markdown(f"##### Algorithm Results for {b_ticker}")
+                    
+                    m1, m2, m3, m4 = st.columns(4)
+                    m1.metric("Total Trades Executed", total_trades)
+                    m2.metric("Historical Win Rate", f"{win_rate:.1f}%")
+                    m3.metric("Final Capital (from ₹1L)", f"₹{capital:,.2f}")
+                    m4.metric("Net ROI", f"{total_return:.2f}%", delta=f"{total_return:.2f}%")
+                    
+                    # Plot Equity Curve
+                    eq_df = pd.DataFrame(equity_curve)
+                    if not eq_df.empty:
+                        fig = px.line(eq_df, x="Date", y="Capital")
+                        fig.update_layout(
+                            title="Strategy Equity Growth Curve",
+                            template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                            margin=dict(l=0, r=0, t=40, b=0), height=400
+                        )
+                        fig.update_traces(line=dict(color='#00E676', width=2))
+                        fig.update_yaxes(title_text="Portfolio Value (₹)", gridcolor='#1E1E1E')
+                        fig.update_xaxes(gridcolor='#1E1E1E')
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.error("Not enough historical data to run this EMA timeframe.")
+            except Exception as e:
+                st.error(f"Backtest Engine Error: {e}")
 
 elif selected_page == "Practice Wallet & Journal":
     user_id = st.session_state.user['id']
