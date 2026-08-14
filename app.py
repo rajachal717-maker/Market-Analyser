@@ -39,36 +39,28 @@ def init_db():
 db_conn = init_db()
 
 # =====================================================================
-# 🛡️ NEW: AUTOMATED SHADOW BACKUP ENGINE
+# 🛡️ AUTOMATED SHADOW BACKUP ENGINE
 # =====================================================================
 def create_shadow_backup():
     db_file = "market_data.db"
     backup_dir = "backups"
     
-    # Only proceed if the main database actually exists
     if os.path.exists(db_file):
-        # Create the backups folder if it doesn't exist
         if not os.path.exists(backup_dir):
             os.makedirs(backup_dir)
             
-        # Create today's backup filename (e.g., market_data_2026-08-14.db)
         today_str = datetime.now().strftime("%Y-%m-%d")
         backup_filename = f"market_data_{today_str}.db"
         backup_path = os.path.join(backup_dir, backup_filename)
         
-        # If we haven't backed up today, create the clone
         if not os.path.exists(backup_path):
             shutil.copy2(db_file, backup_path)
-            print(f"✅ Shadow Backup Created: {backup_filename}")
             
-            # Prune old backups (Keep only the last 7 days to save space)
             all_backups = sorted([f for f in os.listdir(backup_dir) if f.endswith(".db")])
             if len(all_backups) > 7:
                 oldest_backup = all_backups[0]
                 os.remove(os.path.join(backup_dir, oldest_backup))
-                print(f"🗑️ Pruned old backup: {oldest_backup}")
 
-# Run the backup engine silently every time the app starts
 create_shadow_backup()
 
 def get_or_create_default_user():
@@ -149,9 +141,9 @@ with st.sidebar:
     
     selected_page = option_menu(
         menu_title=None,
-        options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal"],
-        icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2"],
-        default_index=5,
+        options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal", "DB Admin Vault"],
+        icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2", "server"],
+        default_index=6,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -630,3 +622,61 @@ elif selected_page == "Practice Wallet & Journal":
     else:
         j_df = pd.DataFrame(j_rows, columns=["Timestamp", "Ticker", "Action", "Qty", "Price (₹)", "Total Value (₹)"])
         st.dataframe(j_df, width="stretch", hide_index=True)
+
+# =====================================================================
+# 🗄️ NEW: DATABASE ADMINISTRATION VAULT
+# =====================================================================
+elif selected_page == "DB Admin Vault":
+    st.markdown("##### 🗄️ Database Administration Vault")
+    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Manage your local SQLite database, export data, and reset testing environments.</p>", unsafe_allow_html=True)
+    
+    user_id = st.session_state.user['id']
+    
+    # 1. System Health
+    st.markdown("###### System Health")
+    try:
+        db_size_kb = os.path.getsize("market_data.db") / 1024
+        st.metric("Live Database File Size", f"{db_size_kb:.2f} KB")
+    except Exception as e:
+        st.error(f"Could not read database file size: {e}")
+        
+    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
+    
+    # 2. Data Export
+    st.markdown("###### 📥 One-Click Export")
+    c = db_conn.cursor()
+    c.execute("SELECT timestamp, ticker, action, quantity, price, total_value FROM trade_journal WHERE user_id = ? ORDER BY id DESC", (user_id,))
+    journal_rows = c.fetchall()
+    
+    if journal_rows:
+        df_export = pd.DataFrame(journal_rows, columns=["Timestamp", "Ticker", "Action", "Quantity", "Price", "Total Value"])
+        csv_data = df_export.to_csv(index=False).encode('utf-8')
+        
+        st.download_button(
+            label="📥 Download Trade Journal (CSV)",
+            data=csv_data,
+            file_name=f"trade_journal_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No trade data available to export.")
+        
+    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
+    
+    # 3. Danger Zone
+    st.markdown("###### ⚠️ Danger Zone (Environment Reset)")
+    with st.expander("Reset Practice Wallet & Wipe History"):
+        st.warning("Action is irreversible. This will reset your wallet to ₹10,00,000, sell all current holdings, and permanently delete your trade journal.")
+        
+        confirm_reset = st.text_input("Type 'RESET' to confirm execution:")
+        if st.button("🔥 Execute Hard Reset", type="primary"):
+            if confirm_reset == "RESET":
+                c.execute("UPDATE practice_wallets SET balance = 1000000.00 WHERE user_id = ?", (user_id,))
+                c.execute("DELETE FROM practice_holdings WHERE user_id = ?", (user_id,))
+                c.execute("DELETE FROM trade_journal WHERE user_id = ?", (user_id,))
+                db_conn.commit()
+                st.success("Database Reset Successfully! Wallet restored to ₹10,00,000.")
+                time.sleep(1.5)
+                st.rerun()
+            else:
+                st.error("You must type 'RESET' exactly to execute the wipe.")
