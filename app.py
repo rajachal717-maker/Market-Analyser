@@ -84,6 +84,50 @@ def format_ticker(symbol, exchange="NSE"):
 
 st.set_page_config(page_title="Institutional Quant Terminal", page_icon="✨", layout="wide", initial_sidebar_state="expanded")
 
+THEME_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+html, body, [class*="css"], .stApp { font-family: 'Inter', sans-serif; background-color: #000000 !important; color: #E3E3E3; }
+header { background-color: transparent !important; }
+[data-testid="stSidebar"] { background-color: #0A0A0A !important; border-right: 1px solid #1A1A1A; }
+.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea, .stNumberInput>div>div>input { background-color: #121212 !important; color: #FFFFFF !important; border: 1px solid #2B2B2B !important; border-radius: 8px !important; padding: 10px 16px !important; }
+.stButton>button { background-color: #2962FF; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; padding: 0.5rem 1.2rem; }
+div[data-testid="metric-container"] { background-color: #121212; border: 1px solid #2B2B2B; padding: 15px 20px; border-radius: 12px; }
+[data-testid="stMetricLabel"] { color: #9AA0A6 !important; font-size: 12px !important; text-transform: uppercase; }
+[data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 26px !important; font-weight: 600 !important; }
+</style>
+"""
+st.markdown(THEME_CSS, unsafe_allow_html=True)
+
+# =====================================================================
+# 🔒 NEW: APPLICATION PIN LOCK
+# =====================================================================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown("<div style='margin-top: 15vh;'></div>", unsafe_allow_html=True)
+    col1, col2, col3 = st.columns([1, 1.5, 1])
+    with col2:
+        st.markdown("<h2 style='text-align: center; color: #FFFFFF;'>🔒 J.A.R.V.I.S. Terminal Locked</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #9AA0A6; margin-bottom: 24px;'>Please enter your institutional PIN to access the workspace.</p>", unsafe_allow_html=True)
+        
+        with st.form("pin_form"):
+            pin = st.text_input("Security PIN", type="password", max_chars=4, placeholder="Hint: Default is 8888")
+            submitted = st.form_submit_button("Unlock Workspace", width="stretch")
+            
+            if submitted:
+                # Change "8888" to whatever 4-digit PIN you want!
+                if pin == "8888":
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("❌ Access Denied. Invalid PIN.")
+                    
+    # st.stop() pauses the script here so the rest of the app cannot load until unlocked
+    st.stop()
+
+
 try:
     from ddgs import DDGS
     search_available = True
@@ -105,21 +149,6 @@ class SecurityVault:
         return self.aes.decrypt(token[:12], token[12:], None)
 
 vault = SecurityVault()
-
-THEME_CSS = """
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-html, body, [class*="css"], .stApp { font-family: 'Inter', sans-serif; background-color: #000000 !important; color: #E3E3E3; }
-header { background-color: transparent !important; }
-[data-testid="stSidebar"] { background-color: #0A0A0A !important; border-right: 1px solid #1A1A1A; }
-.stTextInput>div>div>input, .stSelectbox>div>div>div, .stTextArea>div>div>textarea, .stNumberInput>div>div>input { background-color: #121212 !important; color: #FFFFFF !important; border: 1px solid #2B2B2B !important; border-radius: 8px !important; padding: 10px 16px !important; }
-.stButton>button { background-color: #2962FF; color: #FFFFFF; border: none; border-radius: 8px; font-weight: 600; padding: 0.5rem 1.2rem; }
-div[data-testid="metric-container"] { background-color: #121212; border: 1px solid #2B2B2B; padding: 15px 20px; border-radius: 12px; }
-[data-testid="stMetricLabel"] { color: #9AA0A6 !important; font-size: 12px !important; text-transform: uppercase; }
-[data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 26px !important; font-weight: 600 !important; }
-</style>
-"""
-st.markdown(THEME_CSS, unsafe_allow_html=True)
 
 if "nse_watchlist" not in st.session_state:
     st.session_state.nse_watchlist = ["NIFTY", "BANKNIFTY", "VMART", "NOCIL", "RELIANCE"]
@@ -143,7 +172,7 @@ with st.sidebar:
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal", "DB Admin Vault"],
         icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2", "server"],
-        default_index=6,
+        default_index=3,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -623,16 +652,12 @@ elif selected_page == "Practice Wallet & Journal":
         j_df = pd.DataFrame(j_rows, columns=["Timestamp", "Ticker", "Action", "Qty", "Price (₹)", "Total Value (₹)"])
         st.dataframe(j_df, width="stretch", hide_index=True)
 
-# =====================================================================
-# 🗄️ NEW: DATABASE ADMINISTRATION VAULT
-# =====================================================================
 elif selected_page == "DB Admin Vault":
     st.markdown("##### 🗄️ Database Administration Vault")
     st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Manage your local SQLite database, export data, and reset testing environments.</p>", unsafe_allow_html=True)
     
     user_id = st.session_state.user['id']
     
-    # 1. System Health
     st.markdown("###### System Health")
     try:
         db_size_kb = os.path.getsize("market_data.db") / 1024
@@ -642,7 +667,6 @@ elif selected_page == "DB Admin Vault":
         
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
-    # 2. Data Export
     st.markdown("###### 📥 One-Click Export")
     c = db_conn.cursor()
     c.execute("SELECT timestamp, ticker, action, quantity, price, total_value FROM trade_journal WHERE user_id = ? ORDER BY id DESC", (user_id,))
@@ -663,7 +687,6 @@ elif selected_page == "DB Admin Vault":
         
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
-    # 3. Danger Zone
     st.markdown("###### ⚠️ Danger Zone (Environment Reset)")
     with st.expander("Reset Practice Wallet & Wipe History"):
         st.warning("Action is irreversible. This will reset your wallet to ₹10,00,000, sell all current holdings, and permanently delete your trade journal.")
