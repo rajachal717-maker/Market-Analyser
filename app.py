@@ -33,6 +33,11 @@ def init_db():
                     action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, target_price REAL, condition TEXT)''')
+                    
+    # Create the Archive Table for the Pruning Engine
+    c.execute('''CREATE TABLE IF NOT EXISTS archived_trade_journal (
+                    id INTEGER PRIMARY KEY, user_id INTEGER, timestamp TEXT, ticker TEXT, 
+                    action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
     conn.commit()
     return conn
 
@@ -62,6 +67,33 @@ def create_shadow_backup():
                 os.remove(os.path.join(backup_dir, oldest_backup))
 
 create_shadow_backup()
+
+# =====================================================================
+# 🧹 NEW: AUTOMATED DATABASE PRUNING ENGINE
+# =====================================================================
+def auto_prune_database():
+    try:
+        c = db_conn.cursor()
+        # Define the cutoff date (1 year ago)
+        one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Check if there are old trades to prune
+        c.execute("SELECT COUNT(*) FROM trade_journal WHERE timestamp < ?", (one_year_ago,))
+        old_trades_count = c.fetchone()[0]
+        
+        if old_trades_count > 0:
+            # Move old trades to the archive table
+            c.execute('''INSERT OR IGNORE INTO archived_trade_journal 
+                         SELECT * FROM trade_journal WHERE timestamp < ?''', (one_year_ago,))
+            # Delete them from the live active table
+            c.execute('''DELETE FROM trade_journal WHERE timestamp < ?''', (one_year_ago,))
+            db_conn.commit()
+            print(f"🧹 Pruned {old_trades_count} trades older than 1 year to the archive.")
+    except Exception as e:
+        print(f"Pruning Engine Error: {e}")
+
+# Run the pruning engine silently on startup
+auto_prune_database()
 
 def get_or_create_default_user():
     c = db_conn.cursor()
@@ -100,7 +132,7 @@ div[data-testid="metric-container"] { background-color: #121212; border: 1px sol
 st.markdown(THEME_CSS, unsafe_allow_html=True)
 
 # =====================================================================
-# 🔒 NEW: APPLICATION PIN LOCK
+# 🔒 APPLICATION PIN LOCK
 # =====================================================================
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -117,14 +149,12 @@ if not st.session_state.authenticated:
             submitted = st.form_submit_button("Unlock Workspace", width="stretch")
             
             if submitted:
-                # Change "8888" to whatever 4-digit PIN you want!
                 if pin == "0109":
                     st.session_state.authenticated = True
                     st.rerun()
                 else:
                     st.error("❌ Access Denied. Invalid PIN.")
                     
-    # st.stop() pauses the script here so the rest of the app cannot load until unlocked
     st.stop()
 
 
@@ -172,7 +202,7 @@ with st.sidebar:
         menu_title=None,
         options=["AI Assistant", "Web Intelligence", "Live Market Feed", "Screener & Diagnostics", "Strategy Backtester", "Practice Wallet & Journal", "DB Admin Vault"],
         icons=["robot", "globe", "activity", "search", "bar-chart-steps", "wallet2", "server"],
-        default_index=3,
+        default_index=6,
         styles={
             "container": {"padding": "0!important", "background-color": "transparent"},
             "icon": {"color": "#9AA0A6", "font-size": "18px"},
@@ -654,7 +684,7 @@ elif selected_page == "Practice Wallet & Journal":
 
 elif selected_page == "DB Admin Vault":
     st.markdown("##### 🗄️ Database Administration Vault")
-    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Manage your local SQLite database, export data, and reset testing environments.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Manage your local SQLite database, export data, and monitor pruning optimization.</p>", unsafe_allow_html=True)
     
     user_id = st.session_state.user['id']
     
@@ -667,8 +697,23 @@ elif selected_page == "DB Admin Vault":
         
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
-    st.markdown("###### 📥 One-Click Export")
+    # NEW: Pruning Engine Statistics
+    st.markdown("###### 🧹 Database Pruning & Optimization")
     c = db_conn.cursor()
+    c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = ?", (user_id,))
+    active_trades = c.fetchone()[0]
+    
+    c.execute("SELECT COUNT(*) FROM archived_trade_journal WHERE user_id = ?", (user_id,))
+    archived_trades = c.fetchone()[0]
+    
+    col_p1, col_p2 = st.columns(2)
+    col_p1.metric("Active Journal Entries (< 1 Year)", active_trades)
+    col_p2.metric("Archived Entries (> 1 Year)", archived_trades)
+    st.caption("The terminal automatically archives trades older than 365 days on startup to maintain lightning-fast query speeds for the AI and UI.")
+
+    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
+    
+    st.markdown("###### 📥 One-Click Export")
     c.execute("SELECT timestamp, ticker, action, quantity, price, total_value FROM trade_journal WHERE user_id = ? ORDER BY id DESC", (user_id,))
     journal_rows = c.fetchall()
     
@@ -689,7 +734,7 @@ elif selected_page == "DB Admin Vault":
     
     st.markdown("###### ⚠️ Danger Zone (Environment Reset)")
     with st.expander("Reset Practice Wallet & Wipe History"):
-        st.warning("Action is irreversible. This will reset your wallet to ₹10,00,000, sell all current holdings, and permanently delete your trade journal.")
+        st.warning("Action is irreversible. This will reset your wallet to ₹10,00,000, sell all current holdings, and permanently delete your live trade journal.")
         
         confirm_reset = st.text_input("Type 'RESET' to confirm execution:")
         if st.button("🔥 Execute Hard Reset", type="primary"):
