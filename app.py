@@ -20,11 +20,26 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 
 # =====================================================================
-# 🗄️ ADVANCED PROFESSIONAL SQLITE BACKEND
+# 🗄️ ADVANCED PROFESSIONAL SQLITE BACKEND (WITH SELF-HEALING)
 # =====================================================================
 def init_db():
-    conn = sqlite3.connect("market_data.db", check_same_thread=False)
-    c = conn.cursor()
+    db_path = "market_data.db"
+    
+    # 1. First, attempt to connect and test the file integrity
+    try:
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        c = conn.cursor()
+        # A simple read query to trigger an error if the file is corrupted
+        c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    except sqlite3.DatabaseError:
+        # 2. If corrupted, delete the broken file to start fresh
+        if os.path.exists(db_path):
+            os.remove(db_path)
+        # Create a new connection to generate a clean database file
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        c = conn.cursor()
+
+    # 3. Build the tables safely on the verified database
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
@@ -32,9 +47,7 @@ def init_db():
                     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, timestamp TEXT, ticker TEXT, 
                     action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, target_price REAL, condition TEXT)''')
-                    
-    # Create the Archive Table for the Pruning Engine
+                     id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, target_price REAL, condition TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS archived_trade_journal (
                     id INTEGER PRIMARY KEY, user_id INTEGER, timestamp TEXT, ticker TEXT, 
                     action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
