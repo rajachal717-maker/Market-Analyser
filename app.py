@@ -224,51 +224,46 @@ with col_h2:
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
-if selected_page == "AI Assistant":
-    from langchain_community.utilities import SQLDatabase
-    from langchain_community.agent_toolkits import create_sql_agent
-    
+    if selected_page == "AI Assistant":
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. Connected to your database. Ask me about your portfolio balance, cash, or holdings."}]
+        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. Direct database connection active. Ask me about your portfolio."}]
+    
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="✨" if message["role"] == "assistant" else "👤"):
             st.markdown(message["content"])
+            
     if prompt := st.chat_input("Ask a quantitative or portfolio question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user", avatar="👤"): st.markdown(prompt)
+        with st.chat_message("user", avatar="👤"): 
+            st.markdown(prompt)
+            
         with st.chat_message("assistant", avatar="✨"):
-            with st.spinner("Accessing local database..."):
+            with st.spinner("Retrieving data..."):
                 try:
                     api_key = os.environ.get("GROQ_API_KEY")
-                    if not api_key: st.error("GROQ_API_KEY environment variable missing.")
+                    if not api_key: 
+                        st.error("GROQ_API_KEY missing.")
                     else:
-                        db = SQLDatabase.from_uri("sqlite:///market_data.db")
+                        # Direct database access (NO AGENT, NO ITERATION)
+                        c = db_conn.cursor()
+                        c.execute("SELECT balance FROM practice_wallets WHERE user_id = 1")
+                        bal_row = c.fetchone()
+                        balance = bal_row[0] if bal_row else 0.0
+                        
+                        c.execute("SELECT ticker, quantity, avg_price FROM practice_holdings WHERE user_id = 1")
+                        holdings = c.fetchall()
+                        
+                        # Just summarize the raw data
+                        context = f"User has ₹{balance} cash. Holdings: {holdings}. Query: {prompt}"
+                        
                         llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0, groq_api_key=api_key)
+                        response = llm.invoke(f"You are J.A.R.V.I.S. Use this data: {context}. Give a short, professional answer.").content
                         
-                        agent_executor = create_sql_agent(
-                            llm, 
-                            db=db, 
-                            agent_type="zero-shot-react-description", 
-                            verbose=False,
-                            max_iterations=5, # Raised slightly to give it room
-                            handle_parsing_errors=True # Automatically fixes formatting errors
-                        )
-                        
-                        # Direct hint so the agent doesn't waste iterations guessing table names
-                        enhanced_prompt = f"""
-                        You are J.A.R.V.I.S., a quant assistant. The user's query is: "{prompt}".
-                        Database schema reference:
-                        - practice_wallets has columns: user_id, balance
-                        - practice_holdings has columns: user_id, ticker, quantity, avg_price
-                        - trade_journal has columns: id, user_id, timestamp, ticker, action, quantity, price, total_value
-                        Write a quick SQL query, get the result, and answer the user directly in plain English.
-                        """
-                        
-                        response_msg = agent_executor.run(enhanced_prompt)
-                        st.markdown(response_msg)
-                        st.session_state.messages.append({"role": "assistant", "content": response_msg})
+                        st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e: 
-                    st.error(f"AI Assistant Error: {e}")
+                    st.error(f"Error: {e}")
+
 
 
 
