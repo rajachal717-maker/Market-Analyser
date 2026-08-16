@@ -801,3 +801,4 @@ elif selected_page == "DB Admin Vault":
                 st.rerun()
             else:
                 st.error("You must type 'RESET' exactly to execute the wipe.")
+
