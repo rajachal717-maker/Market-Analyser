@@ -347,12 +347,14 @@ elif selected_page == "Live Market Feed":
         if not alerts: st.info("No active price alerts.")
         else:
             for aid, atick, apri in alerts:
-                cols = st.columns([3, 1])
-                cols.markdown(f"**{atick}** target: ₹{apri}")
-                if cols.button("Delete", key=f"del_al_{aid}"):
+                # FIX: Unpack the columns correctly into c1 and c2
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**{atick}** target: ₹{apri}")
+                if c2.button("Delete", key=f"del_al_{aid}"):
                     c.execute("DELETE FROM price_alerts WHERE id = ?", (aid,))
                     db_conn.commit()
                     st.rerun()
+    
 
 
 elif selected_page == "Screener & Diagnostics":
