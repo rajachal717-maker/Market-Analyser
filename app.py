@@ -224,7 +224,7 @@ with col_h2:
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
-if selected_page == "AI Assistant":
+elif selected_page == "AI Assistant":
     from langchain_community.utilities import SQLDatabase
     from langchain_community.agent_toolkits import create_sql_agent
     
@@ -269,6 +269,7 @@ if selected_page == "AI Assistant":
                         st.session_state.messages.append({"role": "assistant", "content": response_msg})
                 except Exception as e: 
                     st.error(f"AI Assistant Error: {e}")
+
 
 
 elif selected_page == "Web Intelligence":
