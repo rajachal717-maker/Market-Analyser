@@ -295,29 +295,40 @@ elif selected_page == "Live Market Feed":
         except: pass
         return {"Symbol": symbol.strip().upper(), "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
-    st.markdown("<div style='font-size: 14px; font-weight: 500; color: #FFFFFF; margin-bottom: 8px;'>🔍 Quick Quote & Alert Setter</div>", unsafe_allow_html=True)
-    col_sq1, col_sq2, col_sq3 = st.columns([3, 1, 1])
-    with col_sq1: search_ticker = st.text_input("Ticker", placeholder="e.g. NIFTY, ZOMATO", label_visibility="collapsed")
-    with col_sq2: search_exchange = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
-    with col_sq3: search_quote_btn = st.button("Get Quote", width="stretch")
+    st.markdown("##### ⚡ Active Market Search")
+    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Type a ticker and press <b>Enter</b> to pull live data instantly.</p>", unsafe_allow_html=True)
+    
+    col_sq1, col_sq2 = st.columns([4, 1])
+    with col_sq1: 
+        # Active Search Bar (No button needed)
+        search_ticker = st.text_input("Active Search", placeholder="🔍 Search e.g. NIFTY, VMART, ZOMATO...", label_visibility="collapsed")
+    with col_sq2: 
+        search_exchange = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
 
-    if search_quote_btn and search_ticker.strip():
-        quote = get_yf_quote(search_ticker, search_exchange)
-        if quote["Last (₹)"] != "N/A":
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Asset", quote['Symbol'])
-            c2.metric("Last Price", f"₹{quote['Last (₹)']}")
-            c3.metric("Daily Change", f"{quote['Change (%)']}%")
-            
-            with st.expander("🔔 Set Target Price Alert"):
-                with st.form("alert_form"):
-                    target_p = st.number_input("Target Price (₹)", value=float(quote['Last (₹)']))
-                    if st.form_submit_button("Save Alert"):
-                        c = db_conn.cursor()
-                        c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", (st.session_state.user['id'], search_ticker.upper(), target_p, "CROSS"))
-                        db_conn.commit()
-                        st.success(f"Alert set for {search_ticker.upper()} at ₹{target_p}!")
-        else: st.error("Quote not found.")
+    # Automatically trigger when user types and hits enter!
+    if search_ticker.strip():
+        with st.spinner("Fetching live feed..."):
+            quote = get_yf_quote(search_ticker, search_exchange)
+            if quote["Last (₹)"] != "N/A":
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Asset", quote['Symbol'])
+                c2.metric("Live Price", f"₹{quote['Last (₹)']}")
+                
+                # Dynamic Green/Red indicator for daily change
+                c3.metric("Daily Change", f"{quote['Change (%)']}%", delta=f"{quote['Change (%)']}%")
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                with st.expander("🔔 Set Target Price Alert", expanded=False):
+                    with st.form("alert_form"):
+                        target_p = st.number_input("Target Price (₹)", value=float(quote['Last (₹)']))
+                        if st.form_submit_button("Save Alert"):
+                            c = db_conn.cursor()
+                            c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", (st.session_state.user['id'], search_ticker.upper(), target_p, "CROSS"))
+                            db_conn.commit()
+                            st.success(f"Alert set for {search_ticker.upper()} at ₹{target_p}!")
+            else: 
+                st.error("Quote not found. Please verify the ticker symbol.")
+                
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
     col_w_left, col_w_right = st.columns(2)
@@ -342,6 +353,7 @@ elif selected_page == "Live Market Feed":
                     c.execute("DELETE FROM price_alerts WHERE id = ?", (aid,))
                     db_conn.commit()
                     st.rerun()
+
 
 elif selected_page == "Screener & Diagnostics":
     screen_col1, screen_col2 = st.columns([3, 1])
