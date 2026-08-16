@@ -285,57 +285,80 @@ elif selected_page == "Web Intelligence":
                 except Exception as e: st.error(f"Search error: {e}")
 
 elif selected_page == "Live Market Feed":
-    def get_yf_quote(symbol, exchange):
-        import yfinance as yf
-        yf_ticker = format_ticker(symbol, exchange)
-        try:
-            ticker = yf.Ticker(yf_ticker)
-            curr, prev = ticker.fast_info.get('lastPrice'), ticker.fast_info.get('previousClose')
-            if curr and prev: return {"Symbol": symbol.strip().upper(), "Exchange": exchange, "Last (₹)": round(curr, 2), "Change (%)": round(((curr - prev) / prev) * 100, 2)}
-        except: pass
-        return {"Symbol": symbol.strip().upper(), "Exchange": exchange, "Last (₹)": "N/A", "Change (%)": "N/A"}
-
-    st.markdown("##### ⚡ Active Market Search")
-    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Type a ticker and press <b>Enter</b> to pull live data instantly.</p>", unsafe_allow_html=True)
+    import requests
     
-    col_sq1, col_sq2 = st.columns([4, 1])
-    with col_sq1: 
-        # Active Search Bar (No button needed)
-        search_ticker = st.text_input("Active Search", placeholder="🔍 Search e.g. NIFTY, VMART, ZOMATO...", label_visibility="collapsed")
-    with col_sq2: 
-        search_exchange = st.selectbox("Exchange", ["NSE", "BSE"], label_visibility="collapsed")
+    def get_exact_yf_quote(exact_symbol):
+        import yfinance as yf
+        try:
+            ticker = yf.Ticker(exact_symbol)
+            curr, prev = ticker.fast_info.get('lastPrice'), ticker.fast_info.get('previousClose')
+            if curr and prev: 
+                return {"Symbol": exact_symbol, "Last (₹)": round(curr, 2), "Change (%)": round(((curr - prev) / prev) * 100, 2)}
+        except: pass
+        return {"Symbol": exact_symbol, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
-    # Automatically trigger when user types and hits enter!
-    if search_ticker.strip():
-        with st.spinner("Fetching live feed..."):
-            quote = get_yf_quote(search_ticker, search_exchange)
-            if quote["Last (₹)"] != "N/A":
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Asset", quote['Symbol'])
-                c2.metric("Live Price", f"₹{quote['Last (₹)']}")
+    def search_company_symbols(query):
+        # Queries the Yahoo Finance backend database directly for autocomplete results
+        url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=8&newsCount=0"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        try:
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                quotes = resp.json().get('quotes', [])
+                # Format the results into a clean, readable list
+                return [f"{q.get('symbol')} | {q.get('shortname', 'Unknown')} ({q.get('exchDisp', 'Unknown')})" 
+                        for q in quotes if 'symbol' in q]
+        except Exception: pass
+        return []
+
+    st.markdown("##### ⚡ Universal Market Search")
+    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Search any company name (e.g. 'Tata Motors') to find all its listed shares and variants.</p>", unsafe_allow_html=True)
+    
+    # 1. The Universal Search Bar
+    search_query = st.text_input("Universal Search", placeholder="🔍 Type a company name or ticker and press Enter...", label_visibility="collapsed")
+    
+    if search_query.strip():
+        with st.spinner("Scanning global exchanges..."):
+            results = search_company_symbols(search_query)
+            
+        if results:
+            # 2. Dropdown menu of all found variants
+            selected_match = st.selectbox("Select exact listing:", results)
+            
+            if selected_match:
+                # Extract the pure symbol (e.g., "TATAMOTORS.NS" from the dropdown string)
+                exact_symbol = selected_match.split(" | ")[0].strip()
                 
-                # Dynamic Green/Red indicator for daily change
-                c3.metric("Daily Change", f"{quote['Change (%)']}%", delta=f"{quote['Change (%)']}%")
-                
-                st.markdown("<br>", unsafe_allow_html=True)
-                with st.expander("🔔 Set Target Price Alert", expanded=False):
-                    with st.form("alert_form"):
-                        target_p = st.number_input("Target Price (₹)", value=float(quote['Last (₹)']))
-                        if st.form_submit_button("Save Alert"):
-                            c = db_conn.cursor()
-                            c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", (st.session_state.user['id'], search_ticker.upper(), target_p, "CROSS"))
-                            db_conn.commit()
-                            st.success(f"Alert set for {search_ticker.upper()} at ₹{target_p}!")
-            else: 
-                st.error("Quote not found. Please verify the ticker symbol.")
-                
+                with st.spinner(f"Fetching live feed for {exact_symbol}..."):
+                    quote = get_exact_yf_quote(exact_symbol)
+                    
+                    if quote["Last (₹)"] != "N/A":
+                        c1, c2, c3 = st.columns(3)
+                        c1.metric("Asset", quote['Symbol'])
+                        c2.metric("Live Price", f"₹{quote['Last (₹)']}")
+                        c3.metric("Daily Change", f"{quote['Change (%)']}%", delta=f"{quote['Change (%)']}%")
+                        
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        with st.expander("🔔 Set Target Price Alert", expanded=False):
+                            with st.form("alert_form"):
+                                target_p = st.number_input("Target Price (₹)", value=float(quote['Last (₹)']))
+                                if st.form_submit_button("Save Alert"):
+                                    c = db_conn.cursor()
+                                    c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", (st.session_state.user['id'], exact_symbol, target_p, "CROSS"))
+                                    db_conn.commit()
+                                    st.success(f"Alert set for {exact_symbol} at ₹{target_p}!")
+                    else:
+                        st.error("Live quote currently unavailable for this listing.")
+        else:
+            st.warning("No matching companies found. Try a different spelling or a broader term.")
+            
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
     col_w_left, col_w_right = st.columns(2)
     with col_w_left:
         st.markdown("##### 📋 Watchlist Manager")
         with st.form("watchlist_form"):
-            nse_input = st.text_area("NSE Tickers (Include NIFTY, BANKNIFTY)", value=", ".join(st.session_state.nse_watchlist))
+            nse_input = st.text_area("Tracked Tickers (Comma separated)", value=", ".join(st.session_state.nse_watchlist))
             if st.form_submit_button("Update Watchlist"):
                 st.session_state.nse_watchlist = [t.strip().upper() for t in nse_input.split(",") if t.strip()]
                 st.rerun()
@@ -346,14 +369,14 @@ elif selected_page == "Live Market Feed":
         alerts = c.fetchall()
         if not alerts: st.info("No active price alerts.")
         else:
-            for aid, atick, apri in alerts:
-                # FIX: Unpack the columns correctly into c1 and c2
+             for aid, atick, apri in alerts:
                 c1, c2 = st.columns([3, 1])
                 c1.markdown(f"**{atick}** target: ₹{apri}")
                 if c2.button("Delete", key=f"del_al_{aid}"):
                     c.execute("DELETE FROM price_alerts WHERE id = ?", (aid,))
                     db_conn.commit()
                     st.rerun()
+
     
 
 
