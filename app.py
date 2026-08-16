@@ -224,7 +224,7 @@ with col_h2:
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
-elif selected_page == "AI Assistant":
+if selected_page == "AI Assistant":
     from langchain_community.utilities import SQLDatabase
     from langchain_community.agent_toolkits import create_sql_agent
     
