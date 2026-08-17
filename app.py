@@ -269,7 +269,8 @@ if selected_page == "AI Assistant":
                         # Just summarize the raw data
                         context = f"User has ₹{balance} cash. Holdings: {holdings}. Query: {prompt}"
                         
-                        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0, groq_api_key=api_key)
+                        
+                        llm = ChatGroq(model="llama3-8b-8192", temperature=0, groq_api_key=api_key)
                         response = llm.invoke(f"You are J.A.R.V.I.S. Use this data: {context}. Give a short, professional answer.").content
                         
                         st.markdown(response)
