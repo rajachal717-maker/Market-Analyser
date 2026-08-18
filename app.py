@@ -237,7 +237,7 @@ with col_h2:
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
-if selected_page == "AI Assistant":
+elif selected_page == "AI Assistant":
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. Direct database connection active. Ask me about your portfolio."}]
     
@@ -251,32 +251,42 @@ if selected_page == "AI Assistant":
             st.markdown(prompt)
             
         with st.chat_message("assistant", avatar="✨"):
-            with st.spinner("Retrieving data..."):
+            with st.spinner("Retrieving data via NVIDIA NIM..."):
                 try:
-                    api_key = os.environ.get("GROQ_API_KEY")
+                    # 1. Pulling the NVIDIA API Key
+                    api_key = os.environ.get("NVIDIA_API_KEY")
+                    
                     if not api_key: 
-                        st.error("GROQ_API_KEY missing.")
+                        st.error("NVIDIA_API_KEY missing. Please add it to your environment variables or Streamlit Secrets.")
                     else:
-                        # Direct database access (NO AGENT, NO ITERATION)
+                        active_user_id = st.session_state.user['id']
                         c = db_conn.cursor()
-                        c.execute("SELECT balance FROM practice_wallets WHERE user_id = 1")
+                        c.execute("SELECT balance FROM practice_wallets WHERE user_id = ?", (active_user_id,))
                         bal_row = c.fetchone()
                         balance = bal_row[0] if bal_row else 0.0
                         
-                        c.execute("SELECT ticker, quantity, avg_price FROM practice_holdings WHERE user_id = 1")
+                        c.execute("SELECT ticker, quantity, avg_price FROM practice_holdings WHERE user_id = ?", (active_user_id,))
                         holdings = c.fetchall()
                         
-                        # Just summarize the raw data
                         context = f"User has ₹{balance} cash. Holdings: {holdings}. Query: {prompt}"
                         
+                        # 2. Using the NVIDIA endpoint
+                        from langchain_nvidia_ai_endpoints import ChatNVIDIA
                         
-                        llm = ChatGroq(model="llama3-8b-8192", temperature=0, groq_api_key=api_key)
-                        response = llm.invoke(f"You are J.A.R.V.I.S. Use this data: {context}. Give a short, professional answer.").content
+                        # 3. Powered by NVIDIA Nemotron!
+                        llm = ChatNVIDIA(
+                            model="nvidia/nemotron-4-340b-instruct", 
+                            temperature=0, 
+                            nvidia_api_key=api_key
+                        )
+                        
+                        response = llm.invoke(f"You are J.A.R.V.I.S. Use this data to accurately answer the user: {context}. Give a short, professional answer.").content
                         
                         st.markdown(response)
                         st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e: 
                     st.error(f"Error: {e}")
+
 
 
 
