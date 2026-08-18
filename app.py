@@ -275,7 +275,7 @@ if selected_page == "AI Assistant":
                         
                         # 3. Powered by NVIDIA Nemotron!
                         llm = ChatNVIDIA(
-                            model="nvidia/nemotron-4-340b-instruct", 
+                            model="nvidia/nemotron-3-ultra-550b-a55b", 
                             temperature=0, 
                             nvidia_api_key=api_key
                         )
