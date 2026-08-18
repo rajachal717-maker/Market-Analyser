@@ -237,7 +237,7 @@ with col_h2:
         """, unsafe_allow_html=True)
 st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0 24px 0;'>", unsafe_allow_html=True)
 
-elif selected_page == "AI Assistant":
+if selected_page == "AI Assistant":
     if "messages" not in st.session_state:
         st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. online. Direct database connection active. Ask me about your portfolio."}]
     
