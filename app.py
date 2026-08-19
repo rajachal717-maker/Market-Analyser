@@ -515,6 +515,67 @@ elif selected_page == "Screener & Diagnostics":
                                         st.warning(f"No options data found for {target_symbol}. This stock is likely cash-market only.")
                                 except Exception as e:
                                     st.error(f"Options Data Error: {e}")
+                                    st.markdown("<br>", unsafe_allow_html=True)
+                    with st.expander("🔗 Sector Correlation & Divergence", expanded=False):
+                        st.markdown(f"Analyze how **{target_symbol}** moves relative to broader market indices to detect independent price action.")
+                        
+                        col_c1, col_c2 = st.columns([1, 3])
+                        with col_c1:
+                            benchmark_symbol = st.selectbox("Select Benchmark", ["NIFTY", "BANKNIFTY", "SENSEX"])
+                            run_corr = st.button("Run Correlation", width="stretch")
+                            
+                        if run_corr:
+                            with st.spinner(f"Calculating rolling covariance against {benchmark_symbol}..."):
+                                try:
+                                    bench_yf = format_ticker(benchmark_symbol)
+                                    
+                                    # Fetch 6 months of data for the benchmark
+                                    bench_data = yf.Ticker(bench_yf).history(period="6mo")['Close']
+                                    asset_data = hist['Close'] # We already fetched this earlier in the block
+                                    
+                                    # Calculate daily percentage returns
+                                    bench_rets = bench_data.pct_change().dropna()
+                                    asset_rets = asset_data.pct_change().dropna()
+                                    
+                                    # Align the data by date
+                                    aligned_data = pd.concat([asset_rets, bench_rets], axis=1).dropna()
+                                    aligned_data.columns = [target_symbol, benchmark_symbol]
+                                    
+                                    # Calculate the 20-Day Rolling Pearson Correlation
+                                    rolling_corr = aligned_data[target_symbol].rolling(window=20).corr(aligned_data[benchmark_symbol])
+                                    
+                                    # Plot the divergence chart
+                                    corr_fig = go.Figure()
+                                    corr_fig.add_trace(go.Scatter(x=rolling_corr.index, y=rolling_corr, mode='lines', name='20-Day Correlation', line=dict(color='#E040FB', width=2)))
+                                    corr_fig.add_hline(y=0, line_dash="dash", line_color="rgba(255, 255, 255, 0.5)", annotation_text="Zero Correlation (Independent Movement)")
+                                    
+                                    corr_fig.update_layout(
+                                        template='plotly_dark', 
+                                        paper_bgcolor='rgba(0,0,0,0)', 
+                                        plot_bgcolor='rgba(0,0,0,0)', 
+                                        title=f"20-Day Rolling Beta/Correlation: {target_symbol} vs {benchmark_symbol}", 
+                                        height=350,
+                                        margin=dict(l=0, r=0, t=40, b=0)
+                                    )
+                                    
+                                    with col_c2:
+                                        st.plotly_chart(corr_fig, use_container_width=True)
+                                        
+                                        # Display logic based on the final correlation reading
+                                        current_corr = rolling_corr.iloc[-1]
+                                        st.metric("Current 20-Day Correlation", f"{current_corr:.2f}")
+                                        
+                                        if pd.isna(current_corr):
+                                            st.warning("Not enough overlapping data to calculate correlation.")
+                                        elif current_corr < 0.2:
+                                            st.success("🔥 High Divergence Detected: This asset is currently moving independently of the broader market. Watch for custom catalysts.")
+                                        elif current_corr > 0.75:
+                                            st.warning("🔗 High Correlation: Moving in lockstep with the market. Macro index trends will heavily dictate price action.")
+                                        else:
+                                            st.info("⚖️ Moderate Correlation: Standard market beta applies.")
+                                            
+                                except Exception as e:
+                                    st.error(f"Correlation Analysis Error: {e}")
 
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
