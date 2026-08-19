@@ -542,99 +542,134 @@ elif selected_page == "Screener & Diagnostics":
 
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
-
+            
+            
 elif selected_page == "Strategy Backtester":
-    st.markdown("##### ⚙️ Algorithmic Strategy Engine")
-    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Simulate EMA crossover strategies on historical data with strict risk management.</p>", unsafe_allow_html=True)
+    st.markdown("##### ⚙️ Quantitative Strategy Center")
     
-    with st.form("backtest_config"):
-        col_b1, col_b2, col_b3, col_b4 = st.columns(4)
-        with col_b1: b_ticker = st.text_input("Ticker", value="BANKNIFTY").upper()
-        with col_b2: b_period = st.selectbox("Historical Data", ["1y", "2y", "5y"])
-        with col_b3: fast_ema = st.number_input("Fast EMA", value=20, min_value=1)
-        with col_b4: slow_ema = st.number_input("Slow EMA", value=50, min_value=1)
+    # We create sub-tabs inside this page so it doesn't break your sidebar
+    tab_rebalance, tab_ema = st.tabs(["⚖️ Portfolio Rebalancing", "📈 EMA Crossover Engine"])
+    
+    with tab_rebalance:
+        st.markdown("<br><p style='color: #9AA0A6; font-size: 14px;'>Calculate optimal target weights for your institutional watchlists.</p>", unsafe_allow_html=True)
         
-        col_b5, col_b6, col_b7, col_b8 = st.columns(4)
-        with col_b5: use_rsi = st.checkbox("Require Oversold RSI?", value=False)
-        with col_b6: rsi_thresh = st.number_input("Buy if RSI <", value=40, min_value=10, max_value=90)
-        with col_b7: tp_pct = st.number_input("Take Profit (%)", value=5.0, step=0.5)
-        with col_b8: sl_pct = st.number_input("Stop Loss (%)", value=2.0, step=0.5)
+        col_d1, col_d2 = st.columns(2)
+        start_d = col_d1.date_input("Start Date")
+        end_d = col_d2.date_input("End Date")
         
-        run_backtest = st.form_submit_button("Run 1000x Trade Simulation", width="stretch")
-        
-    if run_backtest and b_ticker:
-        with st.spinner(f"Simulating trades on {b_ticker} over {b_period}..."):
-            try:
-                import yfinance as yf
-                yf_ticker = format_ticker(b_ticker)
-                hist = yf.Ticker(yf_ticker).history(period=b_period)
+        if st.button("Run Rebalancing Strategy", type="primary"):
+            # Import your backend logic safely inside the button
+            from data_loader import fetch_stock_data
+            from strategy import RebalancingStrategy
+            
+            tickers = ['VMART', 'NOCIL', 'RELIANCE', 'TCS']
+            
+            with st.spinner("Fetching data and calculating weights..."):
+                data = fetch_stock_data(tickers, start_date=str(start_d), end_date=str(end_d))
                 
-                if len(hist) > slow_ema:
-                    hist['EMA_Fast'] = hist['Close'].ewm(span=fast_ema).mean()
-                    hist['EMA_Slow'] = hist['Close'].ewm(span=slow_ema).mean()
-                    delta = hist['Close'].diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / loss
-                    hist['RSI'] = 100 - (100 / (1 + rs))
-                    
-                    in_position = False
-                    entry_price = 0
-                    trades = []
-                    capital = 100000.0  
-                    equity_curve = []
-                    
-                    for i in range(1, len(hist)):
-                        date = hist.index[i]
-                        close, high, low = hist['Close'].iloc[i], hist['High'].iloc[i], hist['Low'].iloc[i]
-                        
-                        if in_position:
-                            tp_price = entry_price * (1 + (tp_pct / 100))
-                            sl_price = entry_price * (1 - (sl_pct / 100))
-                            if high >= tp_price:
-                                capital += ((tp_price - entry_price) / entry_price) * capital
-                                trades.append({"Date": date, "Type": "WIN", "Return": tp_pct})
-                                in_position = False
-                            elif low <= sl_price:
-                                capital -= ((entry_price - sl_price) / entry_price) * capital
-                                trades.append({"Date": date, "Type": "LOSS", "Return": -sl_pct})
-                                in_position = False
-                        
-                        if not in_position:
-                            crossover_up = (hist['EMA_Fast'].iloc[i] > hist['EMA_Slow'].iloc[i]) and (hist['EMA_Fast'].iloc[i-1] <= hist['EMA_Slow'].iloc[i-1])
-                            rsi_cond = (hist['RSI'].iloc[i] < rsi_thresh) if use_rsi else True
-                            if crossover_up and rsi_cond:
-                                in_position = True
-                                entry_price = close
-                                
-                        equity_curve.append({"Date": date, "Capital": capital})
-                        
-                    total_trades = len(trades)
-                    wins = len([t for t in trades if t["Type"] == "WIN"])
-                    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
-                    total_return = ((capital - 100000) / 100000) * 100
-                    
-                    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
-                    st.markdown(f"##### Algorithm Results for {b_ticker}")
-                    
-                    m1, m2, m3, m4 = st.columns(4)
-                    m1.metric("Total Trades Executed", total_trades)
-                    m2.metric("Historical Win Rate", f"{win_rate:.1f}%")
-                    m3.metric("Final Capital (from ₹1L)", f"₹{capital:,.2f}")
-                    m4.metric("Net ROI", f"{total_return:.2f}%", delta=f"{total_return:.2f}%")
-                    
-                    eq_df = pd.DataFrame(equity_curve)
-                    if not eq_df.empty:
-                        fig = px.line(eq_df, x="Date", y="Capital")
-                        fig.update_layout(title="Strategy Equity Growth Curve", template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=40, b=0), height=400)
-                        fig.update_traces(line=dict(color='#00E676', width=2))
-                        fig.update_yaxes(title_text="Portfolio Value (₹)", gridcolor='#1E1E1E')
-                        fig.update_xaxes(gridcolor='#1E1E1E')
-                        st.plotly_chart(fig, use_container_width=True)
+                if data.empty:
+                    st.error("❌ Failed to fetch data. Check your connection or dates.")
                 else:
-                    st.error("Not enough historical data to run this EMA timeframe.")
-            except Exception as e:
-                st.error(f"Backtest Engine Error: {e}")
+                    strategy = RebalancingStrategy(tickers)
+                    target_weights = strategy.calculate_weights()
+                    
+                    st.markdown("###### Target Allocation Matrix")
+                    cols = st.columns(len(tickers))
+                    for i, (ticker, weight) in enumerate(target_weights.items()):
+                        cols[i].metric(label=ticker, value=f"{weight:.2%}")
+
+    with tab_ema:
+        st.markdown("<br><p style='color: #9AA0A6; font-size: 14px;'>Simulate EMA crossover strategies on historical data with strict risk management.</p>", unsafe_allow_html=True)
+        
+        with st.form("backtest_config"):
+            col_b1, col_b2, col_b3, col_b4 = st.columns(4)
+            with col_b1: b_ticker = st.text_input("Ticker", value="BANKNIFTY").upper()
+            with col_b2: b_period = st.selectbox("Historical Data", ["1y", "2y", "5y"])
+            with col_b3: fast_ema = st.number_input("Fast EMA", value=20, min_value=1)
+            with col_b4: slow_ema = st.number_input("Slow EMA", value=50, min_value=1)
+            
+            col_b5, col_b6, col_b7, col_b8 = st.columns(4)
+            with col_b5: use_rsi = st.checkbox("Require Oversold RSI?", value=False)
+            with col_b6: rsi_thresh = st.number_input("Buy if RSI <", value=40, min_value=10, max_value=90)
+            with col_b7: tp_pct = st.number_input("Take Profit (%)", value=5.0, step=0.5)
+            with col_b8: sl_pct = st.number_input("Stop Loss (%)", value=2.0, step=0.5)
+            
+            run_backtest = st.form_submit_button("Run 1000x Trade Simulation", width="stretch")
+            
+        if run_backtest and b_ticker:
+            with st.spinner(f"Simulating trades on {b_ticker} over {b_period}..."):
+                try:
+                    import yfinance as yf
+                    yf_ticker = format_ticker(b_ticker)
+                    hist = yf.Ticker(yf_ticker).history(period=b_period)
+                    
+                    if len(hist) > slow_ema:
+                        hist['EMA_Fast'] = hist['Close'].ewm(span=fast_ema).mean()
+                        hist['EMA_Slow'] = hist['Close'].ewm(span=slow_ema).mean()
+                        delta = hist['Close'].diff()
+                        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                        rs = gain / loss
+                        hist['RSI'] = 100 - (100 / (1 + rs))
+                        
+                        in_position = False
+                        entry_price = 0
+                        trades = []
+                        capital = 100000.0  
+                        equity_curve = []
+                        
+                        for i in range(1, len(hist)):
+                            date = hist.index[i]
+                            close, high, low = hist['Close'].iloc[i], hist['High'].iloc[i], hist['Low'].iloc[i]
+                            
+                            if in_position:
+                                tp_price = entry_price * (1 + (tp_pct / 100))
+                                sl_price = entry_price * (1 - (sl_pct / 100))
+                                if high >= tp_price:
+                                    capital += ((tp_price - entry_price) / entry_price) * capital
+                                    trades.append({"Date": date, "Type": "WIN", "Return": tp_pct})
+                                    in_position = False
+                                elif low <= sl_price:
+                                    capital -= ((entry_price - sl_price) / entry_price) * capital
+                                    trades.append({"Date": date, "Type": "LOSS", "Return": -sl_pct})
+                                    in_position = False
+                            
+                            if not in_position:
+                                crossover_up = (hist['EMA_Fast'].iloc[i] > hist['EMA_Slow'].iloc[i]) and (hist['EMA_Fast'].iloc[i-1] <= hist['EMA_Slow'].iloc[i-1])
+                                rsi_cond = (hist['RSI'].iloc[i] < rsi_thresh) if use_rsi else True
+                                if crossover_up and rsi_cond:
+                                    in_position = True
+                                    entry_price = close
+                                    
+                            equity_curve.append({"Date": date, "Capital": capital})
+                            
+                        total_trades = len(trades)
+                        wins = len([t for t in trades if t["Type"] == "WIN"])
+                        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+                        total_return = ((capital - 100000) / 100000) * 100
+                        
+                        st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
+                        st.markdown(f"##### Algorithm Results for {b_ticker}")
+                        
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Total Trades Executed", total_trades)
+                        m2.metric("Historical Win Rate", f"{win_rate:.1f}%")
+                        m3.metric("Final Capital (from ₹1L)", f"₹{capital:,.2f}")
+                        m4.metric("Net ROI", f"{total_return:.2f}%", delta=f"{total_return:.2f}%")
+                        
+                        eq_df = pd.DataFrame(equity_curve)
+                        if not eq_df.empty:
+                            fig = px.line(eq_df, x="Date", y="Capital")
+                            fig.update_layout(title="Strategy Equity Growth Curve", template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', margin=dict(l=0, r=0, t=40, b=0), height=400)
+                            fig.update_traces(line=dict(color='#00E676', width=2))
+                            fig.update_yaxes(title_text="Portfolio Value (₹)", gridcolor='#1E1E1E')
+                            fig.update_xaxes(gridcolor='#1E1E1E')
+                            st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.error("Not enough historical data to run this EMA timeframe.")
+                except Exception as e:
+                    st.error(f"Backtest Engine Error: {e}")
+
 
 elif selected_page == "Practice Wallet & Journal":
     st.markdown("##### 🚀 Live Brokerage Execution (Zerodha Kite)")
