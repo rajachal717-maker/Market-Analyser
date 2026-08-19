@@ -372,7 +372,9 @@ elif selected_page == "Live Market Feed":
         c = db_conn.cursor()
         c.execute("SELECT id, ticker, target_price FROM price_alerts WHERE user_id = ?", (st.session_state.user['id'],))
         alerts = c.fetchall()
-        if not alerts: st.info("No active price alerts.")
+        
+        if not alerts: 
+            st.info("No active price alerts.")
         else:
              for aid, atick, apri in alerts:
                 c1, c2 = st.columns([3, 1])
@@ -381,6 +383,53 @@ elif selected_page == "Live Market Feed":
                     c.execute("DELETE FROM price_alerts WHERE id = ?", (aid,))
                     db_conn.commit()
                     st.rerun()
+
+        st.markdown("<hr style='border-color: #2B2B2B; margin: 16px 0;'>", unsafe_allow_html=True)
+        st.markdown("###### 📡 J.A.R.V.I.S. Background Scanner")
+        st.caption("Leave this tab open to actively monitor your watchlist against live market prices.")
+        
+        if st.button("Start Live Scanner", type="primary", width="stretch"):
+            if not alerts:
+                st.warning("Set a target price alert first before starting the scanner.")
+            else:
+                scan_placeholder = st.empty()
+                with scan_placeholder.container():
+                    st.info("Scanner Active: Monitoring live exchange data...")
+                    spinner_ph = st.empty()
+                    
+                    # Run a continuous loop scanning active alerts
+                    for _ in range(300):  # Scans for ~25 minutes before needing a manual restart
+                        c.execute("SELECT id, ticker, target_price FROM price_alerts WHERE user_id = ?", (st.session_state.user['id'],))
+                        current_alerts = c.fetchall()
+                        
+                        if not current_alerts:
+                            st.success("All alerts triggered or deleted. Scanner offline.")
+                            break
+                            
+                        for aid, atick, apri in current_alerts:
+                            try:
+                                with spinner_ph:
+                                    st.caption(f"Pinging exchange for {atick}...")
+                                    
+                                current_price_data = get_exact_yf_quote(atick)
+                                current_price = current_price_data.get('Last (₹)')
+                                
+                                if current_price != "N/A" and isinstance(current_price, (int, float)):
+                                    # Trigger if the price is within a 0.5% threshold of the target
+                                    upper_bound = apri * 1.005
+                                    lower_bound = apri * 0.995
+                                    
+                                    if lower_bound <= current_price <= upper_bound:
+                                        # Trigger visual pop-up and celebration
+                                        st.toast(f"🚨 TARGET HIT: {atick} has reached ₹{current_price}!", icon='🚨')
+                                        st.success(f"**ALERT TRIGGERED:** {atick} is trading at ₹{current_price}. Target was ₹{apri}.")
+                                        
+                                        # Automatically remove the triggered alert from the database
+                                        c.execute("DELETE FROM price_alerts WHERE id = ?", (aid,))
+                                        db_conn.commit()
+                            except Exception:
+                                pass
+                        time.sleep(5)  # Pause for 5 seconds between full watchlist sweeps
 
 elif selected_page == "Screener & Diagnostics":
     screen_col1, screen_col2 = st.columns([3, 1])
@@ -905,7 +954,6 @@ elif selected_page == "Practice Wallet & Journal":
         else:
             j_df = pd.DataFrame(j_rows, columns=["Timestamp", "Ticker", "Action", "Qty", "Price (₹)", "Total Value (₹)"])
             st.dataframe(j_df, width="stretch", hide_index=True)
-
 
 elif selected_page == "DB Admin Vault":
     st.markdown("##### 🗄️ Database Administration Vault")
