@@ -447,11 +447,16 @@ elif selected_page == "Screener & Diagnostics":
                 if not hist.empty:
                     hist['EMA20'] = hist['Close'].ewm(span=20).mean()
                     hist['EMA50'] = hist['Close'].ewm(span=50).mean()
+                    
+                    # Institutional Grade Wilder's RSI Smoothing
                     delta = hist['Close'].diff()
-                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                    rs = gain / loss
+                    up = delta.where(delta > 0, 0)
+                    down = -delta.where(delta < 0, 0)
+                    roll_up = up.ewm(alpha=1/14, adjust=False).mean()
+                    roll_down = down.ewm(alpha=1/14, adjust=False).mean()
+                    rs = roll_up / roll_down
                     hist['RSI'] = 100 - (100 / (1 + rs))
+                    
                     hist['BB_Mid'] = hist['Close'].rolling(window=20).mean()
                     hist['BB_Std'] = hist['Close'].rolling(window=20).std()
                     hist['BB_Upper'] = hist['BB_Mid'] + (hist['BB_Std'] * 2)
@@ -485,50 +490,85 @@ elif selected_page == "Screener & Diagnostics":
                     st.plotly_chart(fig, use_container_width=True)
 
                     st.markdown("<br>", unsafe_allow_html=True)
-                    with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
-                        st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
+                    with st.expander("🤖 Advanced ML Intraday Projection (XGBoost)", expanded=False):
+                        st.markdown(f"Training XGBoost on **Stationary Log Returns** for {target_symbol}...")
                         ml_btn = st.button("Generate ML Forecast")
                         if ml_btn:
-                            with st.spinner("Training ML Model..."):
+                            with st.spinner("Training Stationary XGBoost Model..."):
                                 try:
-                                    from sklearn.ensemble import RandomForestRegressor
+                                    from xgboost import XGBRegressor
                                     intra_data = ticker_obj.history(period="5d", interval="15m")
+                                    
                                     if not intra_data.empty and len(intra_data) > 20:
                                         df = intra_data[['Close', 'Volume']].copy()
-                                        df['Lag1'] = df['Close'].shift(1)
-                                        df['Lag2'] = df['Close'].shift(2)
-                                        df.dropna(inplace=True)
-                                        X, y = df[['Lag1', 'Lag2', 'Volume']], df['Close']
                                         
-                                        model = RandomForestRegressor(n_estimators=100, random_state=42)
+                                        # 1. Transform raw prices into Stationary Returns
+                                        df['Return'] = df['Close'].pct_change()
+                                        df['Target_Return'] = df['Return'].shift(-1) # Predicting the NEXT return
+                                        
+                                        # 2. Advanced Feature Engineering
+                                        df['Lag1_Ret'] = df['Return'].shift(1)
+                                        df['Lag2_Ret'] = df['Return'].shift(2)
+                                        df['Vol_Change'] = df['Volume'].pct_change()
+                                        df['Volatility'] = df['Return'].rolling(window=10).std()
+                                        df.dropna(inplace=True)
+                                        
+                                        X = df[['Return', 'Lag1_Ret', 'Lag2_Ret', 'Vol_Change', 'Volatility']]
+                                        y = df['Target_Return']
+                                        
+                                        # 3. Train XGBoost
+                                        model = XGBRegressor(n_estimators=150, learning_rate=0.01, max_depth=3, random_state=42)
                                         model.fit(X, y)
                                         
+                                        # 4. Iterative Forecasting out 25 steps
                                         future_steps = 25
-                                        curr_lag1, curr_lag2 = df['Close'].iloc[-1], df['Lag1'].iloc[-1]
-                                        avg_vol = df['Volume'].mean()
+                                        curr_ret = df['Return'].iloc[-1]
+                                        curr_lag1_ret = df['Lag1_Ret'].iloc[-1]
+                                        curr_lag2_ret = df['Lag2_Ret'].iloc[-1]
+                                        avg_vol_change = df['Vol_Change'].mean()
+                                        avg_volatility = df['Volatility'].mean()
                                         
-                                        predictions = []
+                                        predicted_returns = []
                                         for _ in range(future_steps):
-                                            pred = model.predict([[curr_lag1, curr_lag2, avg_vol]])[0]
-                                            predictions.append(pred)
-                                            curr_lag2, curr_lag1 = curr_lag1, pred
+                                            pred_df = pd.DataFrame([[curr_ret, curr_lag1_ret, curr_lag2_ret, avg_vol_change, avg_volatility]], 
+                                                                   columns=['Return', 'Lag1_Ret', 'Lag2_Ret', 'Vol_Change', 'Volatility'])
+                                            pred_ret = model.predict(pred_df)[0]
+                                            predicted_returns.append(pred_ret)
                                             
+                                            # Shift lags for next recursive step
+                                            curr_lag2_ret = curr_lag1_ret
+                                            curr_lag1_ret = curr_ret
+                                            curr_ret = float(pred_ret)
+                                            
+                                        # 5. Reconstruct the Price Curve from Predicted Returns
+                                        last_real_price = df['Close'].iloc[-1]
+                                        pred_prices = []
+                                        for ret in predicted_returns:
+                                            next_price = last_real_price * (1 + ret)
+                                            pred_prices.append(next_price)
+                                            last_real_price = next_price
+                                            
+                                        # 6. Render the Chart
                                         pred_fig = go.Figure()
                                         hist_plot = df.tail(50)
                                         pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
                                         pred_x = np.arange(len(hist_plot) - 1, len(hist_plot) + future_steps)
-                                        pred_y = [hist_plot['Close'].iloc[-1]] + predictions
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='ML Forecast', line=dict(color='#2962FF', width=3, dash='dash')))
+                                        pred_y = [hist_plot['Close'].iloc[-1]] + pred_prices
                                         
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='XGBoost Forecast', line=dict(color='#00E676', width=3, dash='dash')))
+                                        
+                                        # Realistic expanding confidence interval based on volatility
                                         std_dev = df['Close'].tail(20).std()
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y + (std_dev * 1.5) for y in pred_y], line=dict(color='rgba(41, 98, 255, 0.2)'), showlegend=False))
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y - (std_dev * 1.5) for y in pred_y], fill='tonexty', fillcolor='rgba(41, 98, 255, 0.1)', line=dict(color='rgba(41, 98, 255, 0.2)'), name='Confidence Zone'))
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y + (std_dev * 1.5) for y in pred_y], line=dict(color='rgba(0, 230, 118, 0.2)'), showlegend=False))
+                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y - (std_dev * 1.5) for y in pred_y], fill='tonexty', fillcolor='rgba(0, 230, 118, 0.1)', line=dict(color='rgba(0, 230, 118, 0.2)'), name='Confidence Zone'))
                                         
-                                        pred_fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, title=f"{target_symbol} Random Forest 15m Projection")
+                                        pred_fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, title=f"{target_symbol} Stationary XGBoost Projection")
                                         st.plotly_chart(pred_fig, use_container_width=True)
-                                        st.success(f"Forecast Complete. Projected End Price: ₹{round(predictions[-1], 2)}")
+                                        st.success(f"Forecast Complete. Projected End Price: ₹{round(pred_prices[-1], 2)}")
                                     else:
                                         st.error("Not enough intraday data for this asset to train the model.")
+                                except ImportError:
+                                    st.error("❌ XGBoost is not installed. Please run `pip install xgboost` locally and add it to your requirements.txt for Streamlit Cloud.")
                                 except Exception as e:
                                     st.error(f"ML Model Error: {e}")
                     
@@ -696,10 +736,14 @@ elif selected_page == "Strategy Backtester":
                     if len(hist) > slow_ema:
                         hist['EMA_Fast'] = hist['Close'].ewm(span=fast_ema).mean()
                         hist['EMA_Slow'] = hist['Close'].ewm(span=slow_ema).mean()
+                        
+                        # Institutional Grade Wilder's RSI Smoothing
                         delta = hist['Close'].diff()
-                        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                        rs = gain / loss
+                        up = delta.where(delta > 0, 0)
+                        down = -delta.where(delta < 0, 0)
+                        roll_up = up.ewm(alpha=1/14, adjust=False).mean()
+                        roll_down = down.ewm(alpha=1/14, adjust=False).mean()
+                        rs = roll_up / roll_down
                         hist['RSI'] = 100 - (100 / (1 + rs))
                         
                         in_position = False
@@ -708,6 +752,9 @@ elif selected_page == "Strategy Backtester":
                         capital = 100000.0  
                         equity_curve = []
                         
+                        # Institutional friction (0.05% slippage/taxes per leg)
+                        friction_cost = 0.0005 
+                        
                         for i in range(1, len(hist)):
                             date = hist.index[i]
                             close, high, low = hist['Close'].iloc[i], hist['High'].iloc[i], hist['Low'].iloc[i]
@@ -715,12 +762,15 @@ elif selected_page == "Strategy Backtester":
                             if in_position:
                                 tp_price = entry_price * (1 + (tp_pct / 100))
                                 sl_price = entry_price * (1 - (sl_pct / 100))
+                                
                                 if high >= tp_price:
-                                    capital += ((tp_price - entry_price) / entry_price) * capital
+                                    exit_price = tp_price * (1 - friction_cost) # Pay slip on exit
+                                    capital += ((exit_price - entry_price) / entry_price) * capital
                                     trades.append({"Date": date, "Type": "WIN", "Return": tp_pct})
                                     in_position = False
                                 elif low <= sl_price:
-                                    capital -= ((entry_price - sl_price) / entry_price) * capital
+                                    exit_price = sl_price * (1 - friction_cost) # Pay slip on exit
+                                    capital -= ((entry_price - exit_price) / entry_price) * capital
                                     trades.append({"Date": date, "Type": "LOSS", "Return": -sl_pct})
                                     in_position = False
                             
@@ -729,7 +779,7 @@ elif selected_page == "Strategy Backtester":
                                 rsi_cond = (hist['RSI'].iloc[i] < rsi_thresh) if use_rsi else True
                                 if crossover_up and rsi_cond:
                                     in_position = True
-                                    entry_price = close
+                                    entry_price = close * (1 + friction_cost) # Pay slip on entry
                                     
                             equity_curve.append({"Date": date, "Capital": capital})
                             
@@ -782,6 +832,7 @@ elif selected_page == "Strategy Backtester":
                                                 - Historical Win Rate: {win_rate:.1f}%
                                                 - Final Net ROI: {total_return:.2f}%
                                                 - Strategy Parameters: Take Profit = {tp_pct}%, Stop Loss = {sl_pct}%
+                                                - Includes 0.05% slippage/brokerage friction per leg.
                                                 
                                                 Provide a concise, 3-bullet-point professional assessment of the strategy's risk profile, statistical feasibility, and potential areas for parameter optimization. Keep it highly technical.
                                                 """
