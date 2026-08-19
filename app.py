@@ -19,29 +19,30 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 
-
+# =====================================================================
+# 📂 ENVIRONMENT ROUTING (STREAMLIT CLOUD FIX)
+# =====================================================================
+if os.path.exists('/mount/src/'):
+    DB_PATH = "/tmp/market_data.db"
+    BACKUP_DIR = "/tmp/backups"
+else:
+    DB_PATH = "market_data.db"
+    BACKUP_DIR = "backups"
 
 # =====================================================================
 # 🗄️ ADVANCED PROFESSIONAL SQLITE BACKEND (WITH SELF-HEALING)
 # =====================================================================
 def init_db():
-    db_path = "market_data.db"
-    
-    # 1. First, attempt to connect and test the file integrity
     try:
-        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         c = conn.cursor()
-        # A simple read query to trigger an error if the file is corrupted
         c.execute("SELECT name FROM sqlite_master WHERE type='table'")
     except sqlite3.DatabaseError:
-        # 2. If corrupted, delete the broken file to start fresh
-        if os.path.exists(db_path):
-            os.remove(db_path)
-        # Create a new connection to generate a clean database file
-        conn = sqlite3.connect(db_path, check_same_thread=False)
+        if os.path.exists(DB_PATH):
+            os.remove(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         c = conn.cursor()
 
-    # 3. Build the tables safely on the verified database
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
@@ -62,52 +63,44 @@ db_conn = init_db()
 # 🛡️ AUTOMATED SHADOW BACKUP ENGINE
 # =====================================================================
 def create_shadow_backup():
-    db_file = "market_data.db"
-    backup_dir = "backups"
-    
-    if os.path.exists(db_file):
-        if not os.path.exists(backup_dir):
-            os.makedirs(backup_dir)
+    if os.path.exists(DB_PATH):
+        if not os.path.exists(BACKUP_DIR):
+            os.makedirs(BACKUP_DIR)
             
         today_str = datetime.now().strftime("%Y-%m-%d")
         backup_filename = f"market_data_{today_str}.db"
-        backup_path = os.path.join(backup_dir, backup_filename)
+        backup_path = os.path.join(BACKUP_DIR, backup_filename)
         
         if not os.path.exists(backup_path):
-            shutil.copy2(db_file, backup_path)
+            shutil.copy2(DB_PATH, backup_path)
             
-            all_backups = sorted([f for f in os.listdir(backup_dir) if f.endswith(".db")])
+            all_backups = sorted([f for f in os.listdir(BACKUP_DIR) if f.endswith(".db")])
             if len(all_backups) > 7:
                 oldest_backup = all_backups[0]
-                os.remove(os.path.join(backup_dir, oldest_backup))
+                os.remove(os.path.join(BACKUP_DIR, oldest_backup))
 
 create_shadow_backup()
 
 # =====================================================================
-# 🧹 NEW: AUTOMATED DATABASE PRUNING ENGINE
+# 🧹 AUTOMATED DATABASE PRUNING ENGINE
 # =====================================================================
 def auto_prune_database():
     try:
         c = db_conn.cursor()
-        # Define the cutoff date (1 year ago)
         one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d %H:%M:%S")
         
-        # Check if there are old trades to prune
         c.execute("SELECT COUNT(*) FROM trade_journal WHERE timestamp < ?", (one_year_ago,))
         old_trades_count = c.fetchone()[0]
         
         if old_trades_count > 0:
-            # Move old trades to the archive table
             c.execute('''INSERT OR IGNORE INTO archived_trade_journal 
                          SELECT * FROM trade_journal WHERE timestamp < ?''', (one_year_ago,))
-            # Delete them from the live active table
             c.execute('''DELETE FROM trade_journal WHERE timestamp < ?''', (one_year_ago,))
             db_conn.commit()
             print(f"🧹 Pruned {old_trades_count} trades older than 1 year to the archive.")
     except Exception as e:
         print(f"Pruning Engine Error: {e}")
 
-# Run the pruning engine silently on startup
 auto_prune_database()
 
 def get_or_create_default_user():
@@ -171,7 +164,6 @@ if not st.session_state.authenticated:
                     st.error("❌ Access Denied. Invalid PIN.")
                     
     st.stop()
-
 
 try:
     from ddgs import DDGS
@@ -255,7 +247,6 @@ if selected_page == "AI Assistant":
         with st.chat_message("assistant", avatar="✨"):
             with st.spinner("Retrieving data via NVIDIA NIM..."):
                 try:
-                    # 1. Pulling the NVIDIA API Key
                     api_key = os.environ.get("NVIDIA_API_KEY")
                     
                     if not api_key: 
@@ -272,10 +263,7 @@ if selected_page == "AI Assistant":
                         
                         context = f"User has ₹{balance} cash. Holdings: {holdings}. Query: {prompt}"
                         
-                        # 2. Using the NVIDIA endpoint
                         from langchain_nvidia_ai_endpoints import ChatNVIDIA
-                        
-                        # 3. Powered by NVIDIA Nemotron!
                         llm = ChatNVIDIA(
                             model="nvidia/nemotron-3-ultra-550b-a55b", 
                             temperature=0, 
@@ -288,10 +276,6 @@ if selected_page == "AI Assistant":
                         st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e: 
                     st.error(f"Error: {e}")
-
-
-
-
 
 elif selected_page == "Web Intelligence":
     col_s1, col_s2 = st.columns([4, 1])
@@ -324,14 +308,12 @@ elif selected_page == "Live Market Feed":
         return {"Symbol": exact_symbol, "Last (₹)": "N/A", "Change (%)": "N/A"}
 
     def search_company_symbols(query):
-        # Queries the Yahoo Finance backend database directly for autocomplete results
         url = f"https://query2.finance.yahoo.com/v1/finance/search?q={query}&quotesCount=8&newsCount=0"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         try:
             resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:
                 quotes = resp.json().get('quotes', [])
-                # Format the results into a clean, readable list
                 return [f"{q.get('symbol')} | {q.get('shortname', 'Unknown')} ({q.get('exchDisp', 'Unknown')})" 
                         for q in quotes if 'symbol' in q]
         except Exception: pass
@@ -340,7 +322,6 @@ elif selected_page == "Live Market Feed":
     st.markdown("##### ⚡ Universal Market Search")
     st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Search any company name (e.g. 'Tata Motors') to find all its listed shares and variants.</p>", unsafe_allow_html=True)
     
-    # 1. The Universal Search Bar
     search_query = st.text_input("Universal Search", placeholder="🔍 Type a company name or ticker and press Enter...", label_visibility="collapsed")
     
     if search_query.strip():
@@ -348,11 +329,9 @@ elif selected_page == "Live Market Feed":
             results = search_company_symbols(search_query)
             
         if results:
-            # 2. Dropdown menu of all found variants
             selected_match = st.selectbox("Select exact listing:", results)
             
             if selected_match:
-                # Extract the pure symbol (e.g., "TATAMOTORS.NS" from the dropdown string)
                 exact_symbol = selected_match.split(" | ")[0].strip()
                 
                 with st.spinner(f"Fetching live feed for {exact_symbol}..."):
@@ -403,9 +382,6 @@ elif selected_page == "Live Market Feed":
                     db_conn.commit()
                     st.rerun()
 
-    
-
-
 elif selected_page == "Screener & Diagnostics":
     screen_col1, screen_col2 = st.columns([3, 1])
     with screen_col1: target_symbol = st.text_input("Enter Ticker", value="NIFTY", placeholder="e.g. BANKNIFTY, NOCIL").strip().upper()
@@ -431,7 +407,7 @@ elif selected_page == "Screener & Diagnostics":
                     hist['BB_Std'] = hist['Close'].rolling(window=20).std()
                     hist['BB_Upper'] = hist['BB_Mid'] + (hist['BB_Std'] * 2)
                     hist['BB_Lower'] = hist['BB_Mid'] - (hist['BB_Std'] * 2)
-
+                    
                     last_price = hist['Close'].iloc[-1]
                     last_rsi = hist['RSI'].iloc[-1]
                     trend_signal = "🟢 BULLISH" if hist['EMA20'].iloc[-1] > hist['EMA50'].iloc[-1] else "🔴 BEARISH"
@@ -542,12 +518,11 @@ elif selected_page == "Screener & Diagnostics":
 
                 else: st.error("Could not fetch ticker price history.")
             except Exception as e: st.error(f"Error rendering charts: {e}")
-            
-            
+
 elif selected_page == "Strategy Backtester":
     st.markdown("##### ⚙️ Quantitative Strategy Center")
     
-    # We create sub-tabs inside this page so it doesn't break your sidebar
+    # Dual-tab layout for Backtesting
     tab_rebalance, tab_ema = st.tabs(["⚖️ Portfolio Rebalancing", "📈 EMA Crossover Engine"])
     
     with tab_rebalance:
@@ -558,25 +533,29 @@ elif selected_page == "Strategy Backtester":
         end_d = col_d2.date_input("End Date")
         
         if st.button("Run Rebalancing Strategy", type="primary"):
-            # Import your backend logic safely inside the button
-            from data_loader import fetch_stock_data
-            from strategy import RebalancingStrategy
-            
-            tickers = ['VMART', 'NOCIL', 'RELIANCE', 'TCS']
-            
-            with st.spinner("Fetching data and calculating weights..."):
-                data = fetch_stock_data(tickers, start_date=str(start_d), end_date=str(end_d))
+            try:
+                from data_loader import fetch_stock_data
+                from strategy import RebalancingStrategy
                 
-                if data.empty:
-                    st.error("❌ Failed to fetch data. Check your connection or dates.")
-                else:
-                    strategy = RebalancingStrategy(tickers)
-                    target_weights = strategy.calculate_weights()
+                tickers = ['VMART', 'NOCIL', 'RELIANCE', 'TCS']
+                
+                with st.spinner("Fetching data and calculating weights..."):
+                    data = fetch_stock_data(tickers, start_date=str(start_d), end_date=str(end_d))
                     
-                    st.markdown("###### Target Allocation Matrix")
-                    cols = st.columns(len(tickers))
-                    for i, (ticker, weight) in enumerate(target_weights.items()):
-                        cols[i].metric(label=ticker, value=f"{weight:.2%}")
+                    if data.empty:
+                        st.error("❌ Failed to fetch data. Check your connection or dates.")
+                    else:
+                        strategy = RebalancingStrategy(tickers)
+                        target_weights = strategy.calculate_weights()
+                        
+                        st.markdown("###### Target Allocation Matrix")
+                        cols = st.columns(len(tickers))
+                        for i, (ticker, weight) in enumerate(target_weights.items()):
+                            cols[i].metric(label=ticker, value=f"{weight:.2%}")
+            except ModuleNotFoundError:
+                st.error("Missing local modules: Ensure 'data_loader.py' and 'strategy.py' are correctly uploaded to Streamlit Cloud.")
+            except Exception as e:
+                st.error(f"Rebalancing Error: {e}")
 
     with tab_ema:
         st.markdown("<br><p style='color: #9AA0A6; font-size: 14px;'>Simulate EMA crossover strategies on historical data with strict risk management.</p>", unsafe_allow_html=True)
@@ -670,12 +649,10 @@ elif selected_page == "Strategy Backtester":
                 except Exception as e:
                     st.error(f"Backtest Engine Error: {e}")
 
-
 elif selected_page == "Practice Wallet & Journal":
     st.markdown("##### 🚀 Live Brokerage Execution (Zerodha Kite)")
     st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Connect your production Kite API credentials to route trades directly to the exchange.</p>", unsafe_allow_html=True)
     
-    # 1. API Auth Form
     with st.expander("🔑 Brokerage API Configuration (Zerodha)", expanded=True):
         st.markdown("1. Get your API Key and Secret from [Kite Connect](https://developers.kite.trade/).")
         st.markdown("2. Log in via your app's login URL to get the `request_token`.")
@@ -727,16 +704,14 @@ elif selected_page == "Practice Wallet & Journal":
                             "quantity": int(t_qty),
                             "variety": kite.VARIETY_REGULAR,
                             "order_type": o_type,
-                            "product": kite.PRODUCT_MIS # Intraday default
+                            "product": kite.PRODUCT_MIS 
                         }
                         if order_type == "LIMIT":
                             kwargs["price"] = float(limit_price)
                             
-                        # FIRE THE ORDER TO THE EXCHANGE
                         order_id = kite.place_order(**kwargs)
                         st.success(f"✅ LIVE Order Placed! Exchange ID: {order_id}")
                         
-                        # Log to local SQLite journal for backend analytics
                         c = db_conn.cursor()
                         c.execute("INSERT INTO trade_journal (user_id, timestamp, ticker, action, quantity, price, total_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
                                   (st.session_state.user['id'], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t_ticker, f"LIVE_{t_action}", t_qty, limit_price if order_type=="LIMIT" else 0, 0))
@@ -777,7 +752,6 @@ elif selected_page == "Practice Wallet & Journal":
         j_df = pd.DataFrame(j_rows, columns=["Timestamp", "Ticker", "Action", "Qty", "Price (₹)", "Total Value (₹)"])
         st.dataframe(j_df, width="stretch", hide_index=True)
 
-
 elif selected_page == "DB Admin Vault":
     st.markdown("##### 🗄️ Database Administration Vault")
     st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Manage your local SQLite database, export data, and monitor pruning optimization.</p>", unsafe_allow_html=True)
@@ -786,14 +760,13 @@ elif selected_page == "DB Admin Vault":
     
     st.markdown("###### System Health")
     try:
-        db_size_kb = os.path.getsize("market_data.db") / 1024
+        db_size_kb = os.path.getsize(DB_PATH) / 1024
         st.metric("Live Database File Size", f"{db_size_kb:.2f} KB")
     except Exception as e:
         st.error(f"Could not read database file size: {e}")
         
     st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
     
-    # NEW: Pruning Engine Statistics
     st.markdown("###### 🧹 Database Pruning & Optimization")
     c = db_conn.cursor()
     c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = ?", (user_id,))
@@ -844,4 +817,3 @@ elif selected_page == "DB Admin Vault":
                 st.rerun()
             else:
                 st.error("You must type 'RESET' exactly to execute the wipe.")
-
