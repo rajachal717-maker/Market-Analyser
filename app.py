@@ -748,107 +748,164 @@ elif selected_page == "Strategy Backtester":
                     st.error(f"Backtest Engine Error: {e}")
 
 elif selected_page == "Practice Wallet & Journal":
-    st.markdown("##### 🚀 Live Brokerage Execution (Zerodha Kite)")
-    st.markdown("<p style='color: #9AA0A6; font-size: 14px;'>Connect your production Kite API credentials to route trades directly to the exchange.</p>", unsafe_allow_html=True)
+    st.markdown("##### 💼 Live Brokerage & Analytics")
     
-    with st.expander("🔑 Brokerage API Configuration (Zerodha)", expanded=True):
-        st.markdown("1. Get your API Key and Secret from [Kite Connect](https://developers.kite.trade/).")
-        st.markdown("2. Log in via your app's login URL to get the `request_token`.")
-        col_k1, col_k2, col_k3 = st.columns(3)
-        with col_k1: api_key = st.text_input("Kite API Key", type="password")
-        with col_k2: api_secret = st.text_input("Kite API Secret", type="password")
-        with col_k3: request_token = st.text_input("Request Token")
+    # Organize the workspace into clean sub-tabs
+    tab_exec, tab_analytics, tab_journal = st.tabs(["🚀 Live Execution", "📊 Portfolio Analytics", "📜 Trade Journal"])
+    
+    with tab_exec:
+        st.markdown("<br><p style='color: #9AA0A6; font-size: 14px;'>Connect your production Kite API credentials to route trades directly to the exchange.</p>", unsafe_allow_html=True)
         
-        if st.button("Authenticate Kite Session", width="stretch"):
-            try:
-                from kiteconnect import KiteConnect
-                kite = KiteConnect(api_key=api_key)
-                data = kite.generate_session(request_token, api_secret=api_secret)
-                st.session_state.kite_access_token = data["access_token"]
-                st.session_state.kite_api_key = api_key
-                st.success("✅ Live broker session authenticated! Ready for execution.")
-            except Exception as e:
-                st.error(f"Authentication failed: {e}")
+        with st.expander("🔑 Brokerage API Configuration (Zerodha)", expanded=False):
+            st.markdown("1. Get your API Key and Secret from [Kite Connect](https://developers.kite.trade/).")
+            st.markdown("2. Log in via your app's login URL to get the `request_token`.")
+            col_k1, col_k2, col_k3 = st.columns(3)
+            with col_k1: api_key = st.text_input("Kite API Key", type="password")
+            with col_k2: api_secret = st.text_input("Kite API Secret", type="password")
+            with col_k3: request_token = st.text_input("Request Token")
+            
+            if st.button("Authenticate Kite Session", width="stretch"):
+                try:
+                    from kiteconnect import KiteConnect
+                    kite = KiteConnect(api_key=api_key)
+                    data = kite.generate_session(request_token, api_secret=api_secret)
+                    st.session_state.kite_access_token = data["access_token"]
+                    st.session_state.kite_api_key = api_key
+                    st.success("✅ Live broker session authenticated! Ready for execution.")
+                except Exception as e:
+                    st.error(f"Authentication failed: {e}")
 
-    col_trade, col_port = st.columns([1, 2])
-    with col_trade:
-        st.markdown("##### Execute Live Order")
-        with st.form("live_trade_form"):
-            t_ticker = st.text_input("Ticker", placeholder="e.g., VMART, NOCIL").strip().upper()
-            t_exch = st.selectbox("Exchange", ["NSE", "BSE"])
-            t_qty = st.number_input("Quantity", min_value=1, step=1)
-            t_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
-            order_type = st.selectbox("Order Type", ["MARKET", "LIMIT"])
-            limit_price = st.number_input("Limit Price (if LIMIT)", min_value=0.0, step=0.5)
-            
-            submit_trade = st.form_submit_button("🔥 SUBMIT LIVE ORDER", width="stretch")
-            
-            if submit_trade and t_ticker:
-                if "kite_access_token" not in st.session_state:
-                    st.error("❌ Please authenticate your broker session first.")
-                else:
+        col_trade, col_port = st.columns([1, 2])
+        with col_trade:
+            st.markdown("###### Execute Live Order")
+            with st.form("live_trade_form"):
+                t_ticker = st.text_input("Ticker", placeholder="e.g., VMART, NOCIL").strip().upper()
+                t_exch = st.selectbox("Exchange", ["NSE", "BSE"])
+                t_qty = st.number_input("Quantity", min_value=1, step=1)
+                t_action = st.radio("Action", ["BUY", "SELL"], horizontal=True)
+                order_type = st.selectbox("Order Type", ["MARKET", "LIMIT"])
+                limit_price = st.number_input("Limit Price (if LIMIT)", min_value=0.0, step=0.5)
+                
+                submit_trade = st.form_submit_button("🔥 SUBMIT LIVE ORDER", width="stretch")
+                
+                if submit_trade and t_ticker:
+                    if "kite_access_token" not in st.session_state:
+                        st.error("❌ Please authenticate your broker session first.")
+                    else:
+                        try:
+                            from kiteconnect import KiteConnect
+                            kite = KiteConnect(api_key=st.session_state.kite_api_key)
+                            kite.set_access_token(st.session_state.kite_access_token)
+                            
+                            transaction_type = kite.TRANSACTION_TYPE_BUY if t_action == "BUY" else kite.TRANSACTION_TYPE_SELL
+                            o_type = kite.ORDER_TYPE_MARKET if order_type == "MARKET" else kite.ORDER_TYPE_LIMIT
+                            
+                            kwargs = {
+                                "tradingsymbol": t_ticker,
+                                "exchange": kite.EXCHANGE_NSE if t_exch == "NSE" else kite.EXCHANGE_BSE,
+                                "transaction_type": transaction_type,
+                                "quantity": int(t_qty),
+                                "variety": kite.VARIETY_REGULAR,
+                                "order_type": o_type,
+                                "product": kite.PRODUCT_MIS 
+                            }
+                            if order_type == "LIMIT":
+                                kwargs["price"] = float(limit_price)
+                                
+                            order_id = kite.place_order(**kwargs)
+                            st.success(f"✅ LIVE Order Placed! Exchange ID: {order_id}")
+                            
+                            c = db_conn.cursor()
+                            c.execute("INSERT INTO trade_journal (user_id, timestamp, ticker, action, quantity, price, total_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                      (st.session_state.user['id'], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t_ticker, f"LIVE_{t_action}", t_qty, limit_price if order_type=="LIMIT" else 0, 0))
+                            db_conn.commit()
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Live Execution Error: {e}")
+
+        with col_port:
+            st.markdown("###### Live Brokerage Positions")
+            if st.button("Refresh Live Holdings"):
+                if "kite_access_token" in st.session_state:
                     try:
                         from kiteconnect import KiteConnect
                         kite = KiteConnect(api_key=st.session_state.kite_api_key)
                         kite.set_access_token(st.session_state.kite_access_token)
                         
-                        transaction_type = kite.TRANSACTION_TYPE_BUY if t_action == "BUY" else kite.TRANSACTION_TYPE_SELL
-                        o_type = kite.ORDER_TYPE_MARKET if order_type == "MARKET" else kite.ORDER_TYPE_LIMIT
-                        
-                        kwargs = {
-                            "tradingsymbol": t_ticker,
-                            "exchange": kite.EXCHANGE_NSE if t_exch == "NSE" else kite.EXCHANGE_BSE,
-                            "transaction_type": transaction_type,
-                            "quantity": int(t_qty),
-                            "variety": kite.VARIETY_REGULAR,
-                            "order_type": o_type,
-                            "product": kite.PRODUCT_MIS 
-                        }
-                        if order_type == "LIMIT":
-                            kwargs["price"] = float(limit_price)
-                            
-                        order_id = kite.place_order(**kwargs)
-                        st.success(f"✅ LIVE Order Placed! Exchange ID: {order_id}")
-                        
-                        c = db_conn.cursor()
-                        c.execute("INSERT INTO trade_journal (user_id, timestamp, ticker, action, quantity, price, total_value) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                  (st.session_state.user['id'], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t_ticker, f"LIVE_{t_action}", t_qty, limit_price if order_type=="LIMIT" else 0, 0))
-                        db_conn.commit()
-                        time.sleep(1)
-                        st.rerun()
+                        positions = kite.positions().get('net', [])
+                        if not positions:
+                            st.info("No open positions in your broker account.")
+                        else:
+                            p_df = pd.DataFrame(positions)[['tradingsymbol', 'quantity', 'average_price', 'last_price', 'pnl']]
+                            p_df.rename(columns={'tradingsymbol': 'Ticker', 'quantity': 'Qty', 'average_price': 'Avg Price', 'last_price': 'LTP', 'pnl': 'P&L'}, inplace=True)
+                            st.dataframe(p_df, width="stretch", hide_index=True)
                     except Exception as e:
-                        st.error(f"Live Execution Error: {e}")
-
-    with col_port:
-        st.markdown("##### Live Brokerage Positions")
-        if st.button("Refresh Live Holdings"):
-            if "kite_access_token" in st.session_state:
-                try:
-                    from kiteconnect import KiteConnect
-                    kite = KiteConnect(api_key=st.session_state.kite_api_key)
-                    kite.set_access_token(st.session_state.kite_access_token)
+                        st.error(f"Failed to fetch holdings: {e}")
+                else:
+                    st.warning("Authenticate to view holdings.")
                     
-                    positions = kite.positions().get('net', [])
-                    if not positions:
-                        st.info("No open positions in your broker account.")
-                    else:
-                        p_df = pd.DataFrame(positions)[['tradingsymbol', 'quantity', 'average_price', 'last_price', 'pnl']]
-                        p_df.rename(columns={'tradingsymbol': 'Ticker', 'quantity': 'Qty', 'average_price': 'Avg Price', 'last_price': 'LTP', 'pnl': 'P&L'}, inplace=True)
-                        st.dataframe(p_df, width="stretch", hide_index=True)
-                except Exception as e:
-                    st.error(f"Failed to fetch holdings: {e}")
-            else:
-                st.warning("Authenticate to view holdings.")
+    with tab_analytics:
+        st.markdown("<br>", unsafe_allow_html=True)
+        c = db_conn.cursor()
+        
+        # Fetch high-level KPIs from local database
+        c.execute("SELECT balance FROM practice_wallets WHERE user_id = ?", (st.session_state.user['id'],))
+        bal_row = c.fetchone()
+        current_balance = bal_row[0] if bal_row else 1000000.00
+        
+        net_pnl = current_balance - 1000000.00
+        pnl_pct = (net_pnl / 1000000.00) * 100
+        
+        c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = ?", (st.session_state.user['id'],))
+        total_trades = c.fetchone()[0]
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Available Capital", f"₹{current_balance:,.2f}")
+        m2.metric("Net Realized P&L", f"₹{net_pnl:,.2f}", delta=f"{pnl_pct:.2f}%")
+        m3.metric("Total Executed Logs", total_trades)
+        
+        st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
+        st.markdown("###### 🗺️ Intraday Position Heatmap")
+        
+        if "kite_access_token" in st.session_state:
+            try:
+                from kiteconnect import KiteConnect
+                kite = KiteConnect(api_key=st.session_state.kite_api_key)
+                kite.set_access_token(st.session_state.kite_access_token)
+                positions = kite.positions().get('net', [])
                 
-    st.markdown("<hr style='border-color: #2B2B2B; margin: 24px 0;'>", unsafe_allow_html=True)
-    st.markdown("##### 📜 Permanent Trade Journal & Execution Log", unsafe_allow_html=True)
-    c = db_conn.cursor()
-    c.execute("SELECT timestamp, ticker, action, quantity, price, total_value FROM trade_journal WHERE user_id = ? ORDER BY id DESC", (st.session_state.user['id'],))
-    j_rows = c.fetchall()
-    if not j_rows: st.info("No journal history logged yet.")
-    else:
-        j_df = pd.DataFrame(j_rows, columns=["Timestamp", "Ticker", "Action", "Qty", "Price (₹)", "Total Value (₹)"])
-        st.dataframe(j_df, width="stretch", hide_index=True)
+                if not positions:
+                    st.info("No active positions to map.")
+                else:
+                    hm_df = pd.DataFrame(positions)
+                    hm_df['P&L Status'] = hm_df['pnl'].apply(lambda x: 'Profit' if x > 0 else 'Loss')
+                    hm_df['Absolute P&L'] = hm_df['pnl'].abs()
+                    
+                    fig = px.treemap(
+                        hm_df, 
+                        path=[px.Constant("Portfolio"), 'P&L Status', 'tradingsymbol'], 
+                        values='Absolute P&L',
+                        color='pnl', 
+                        color_continuous_scale=['#FF1744', '#121212', '#00E676'],
+                        color_continuous_midpoint=0
+                    )
+                    fig.update_layout(template='plotly_dark', margin=dict(t=20, l=0, r=0, b=0), height=450, paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig, use_container_width=True)
+            except Exception as e:
+                st.error(f"Could not render heatmap: {e}")
+        else:
+            st.info("⚠️ Connect your Zerodha Kite API in the 'Live Execution' tab to generate the live institutional P&L Heatmap.")
+
+    with tab_journal:
+        st.markdown("<br><p style='color: #9AA0A6; font-size: 14px;'>Permanent local SQLite log of all executed trades.</p>", unsafe_allow_html=True)
+        c.execute("SELECT timestamp, ticker, action, quantity, price, total_value FROM trade_journal WHERE user_id = ? ORDER BY id DESC", (st.session_state.user['id'],))
+        j_rows = c.fetchall()
+        if not j_rows: st.info("No journal history logged yet.")
+        else:
+            j_df = pd.DataFrame(j_rows, columns=["Timestamp", "Ticker", "Action", "Qty", "Price (₹)", "Total Value (₹)"])
+            st.dataframe(j_df, width="stretch", hide_index=True)
+
 
 elif selected_page == "DB Admin Vault":
     st.markdown("##### 🗄️ Database Administration Vault")
