@@ -435,6 +435,44 @@ elif selected_page == "Screener & Diagnostics":
                     fig.update_xaxes(gridcolor='#1E1E1E')
                     st.plotly_chart(fig, use_container_width=True)
 
+                    st.plotly_chart(fig, use_container_width=True)
+                        
+                        # --- NEW AI RISK ASSESSMENT MODULE ---
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        with st.expander("🤖 Request J.A.R.V.I.S. Risk Assessment"):
+                            st.markdown(f"Pass the {b_ticker} simulation results to the NVIDIA Nemotron model for a comprehensive risk analysis.")
+                            
+                            if st.button("Generate AI Risk Report"):
+                                with st.spinner("J.A.R.V.I.S. is analyzing the equity curve and metrics..."):
+                                    api_key = os.environ.get("NVIDIA_API_KEY")
+                                    if not api_key:
+                                        st.error("NVIDIA_API_KEY missing. Please check your environment variables.")
+                                    else:
+                                        try:
+                                            from langchain_nvidia_ai_endpoints import ChatNVIDIA
+                                            llm = ChatNVIDIA(
+                                                model="nvidia/nemotron-3-ultra-550b-a55b", 
+                                                temperature=0.2, 
+                                                nvidia_api_key=api_key
+                                            )
+                                            
+                                            ai_prompt = f"""
+                                            You are J.A.R.V.I.S., an institutional quantitative risk manager. Analyze the following backtest results for an EMA crossover strategy on {b_ticker}:
+                                            - Historical Period: {b_period}
+                                            - Total Trades Executed: {total_trades}
+                                            - Historical Win Rate: {win_rate:.1f}%
+                                            - Final Net ROI: {total_return:.2f}%
+                                            - Strategy Parameters: Take Profit = {tp_pct}%, Stop Loss = {sl_pct}%
+                                            
+                                            Provide a concise, 3-bullet-point professional assessment of the strategy's risk profile, statistical feasibility, and potential areas for parameter optimization. Keep it highly technical.
+                                            """
+                                            
+                                            response = llm.invoke(ai_prompt).content
+                                            st.markdown("###### 🛡️ Quantitative Risk Assessment")
+                                            st.info(response)
+                                        except Exception as e:
+                                            st.error(f"AI Analysis Error: {e}")
+
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("🤖 ML Intraday Price Projection (Next 24h)", expanded=False):
                         st.markdown(f"Training Random Forest Regressor on {target_symbol} 15-minute intervals...")
