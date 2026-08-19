@@ -18,48 +18,8 @@ from langchain_groq import ChatGroq
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import streamlit as st
-from data_loader import fetch_stock_data
-from strategy import RebalancingStrategy
 
-st.set_page_config(page_title="Institutional Quant Terminal", layout="wide")
-st.title("J.A.R.V.I.S. Quantitative Terminal")
 
-# Scaffold the single-screen layout
-tab_market, tab_intraday, tab_backtest = st.tabs([
-    "📈 Live Market & Charts", 
-    "🤖 Intraday Predictor", 
-    "🧪 Strategy Backtesting"
-])
-
-# ... [Your existing market chart code goes in tab_market] ...
-
-# Implement the logic from your main.py into the Backtesting tab
-with tab_backtest:
-    st.header("Portfolio Rebalancing Engine")
-    
-    # Let the user adjust the date range dynamically
-    col1, col2 = st.columns(2)
-    start_d = col1.date_input("Start Date", value=None)
-    end_d = col2.date_input("End Date", value=None)
-    
-    if st.button("Run Rebalancing Strategy", type="primary"):
-        tickers = ['VMART', 'NOCIL', 'RELIANCE', 'TCS']
-        
-        with st.spinner("Fetching data and calculating weights..."):
-            data = fetch_stock_data(tickers, start_date=str(start_d), end_date=str(end_d))
-            
-            if data.empty:
-                st.error("❌ Failed to fetch data. Check your connection or dates.")
-            else:
-                strategy = RebalancingStrategy(tickers)
-                target_weights = strategy.calculate_weights()
-                
-                st.subheader("Target Allocation Matrix")
-                
-                # Display the data nicely instead of just print()
-                for ticker, weight in target_weights.items():
-                    st.metric(label=ticker, value=f"{weight:.2%}")
 
 # =====================================================================
 # 🗄️ ADVANCED PROFESSIONAL SQLITE BACKEND (WITH SELF-HEALING)
