@@ -499,76 +499,81 @@ elif selected_page == "Screener & Diagnostics":
                                     from xgboost import XGBRegressor
                                     intra_data = ticker_obj.history(period="5d", interval="15m")
                                     
-                                    if not intra_data.empty and len(intra_data) > 20:
+                                    if intra_data.empty or len(intra_data) < 20:
+                                        st.error(f"Not enough intraday data fetched for {target_symbol}.")
+                                    else:
                                         df = intra_data[['Close', 'Volume']].copy()
                                         
                                         # 1. Transform raw prices into Stationary Returns
                                         df['Return'] = df['Close'].pct_change()
-                                        df['Target_Return'] = df['Return'].shift(-1) # Predicting the NEXT return
+                                        df['Target_Return'] = df['Return'].shift(-1) 
                                         
                                         # 2. Advanced Feature Engineering
                                         df['Lag1_Ret'] = df['Return'].shift(1)
                                         df['Lag2_Ret'] = df['Return'].shift(2)
-                                        df['Vol_Change'] = df['Volume'].pct_change()
-                                        df['Volatility'] = df['Return'].rolling(window=10).std()
-                                        df.dropna(inplace=True)
                                         
-                                        X = df[['Return', 'Lag1_Ret', 'Lag2_Ret', 'Vol_Change', 'Volatility']]
-                                        y = df['Target_Return']
+                                        # CRITICAL FIX: Scrub infinite values and NaNs caused by Zero-Volume indices
+                                        df['Vol_Change'] = df['Volume'].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
+                                        df['Volatility'] = df['Return'].rolling(window=10).std().fillna(0)
                                         
-                                        # 3. Train XGBoost
-                                        model = XGBRegressor(n_estimators=150, learning_rate=0.01, max_depth=3, random_state=42)
-                                        model.fit(X, y)
+                                        # Only drop the specific edge rows that lack lag/target data
+                                        df = df.dropna(subset=['Return', 'Target_Return', 'Lag1_Ret', 'Lag2_Ret'])
                                         
-                                        # 4. Iterative Forecasting out 25 steps
-                                        future_steps = 25
-                                        curr_ret = df['Return'].iloc[-1]
-                                        curr_lag1_ret = df['Lag1_Ret'].iloc[-1]
-                                        curr_lag2_ret = df['Lag2_Ret'].iloc[-1]
-                                        avg_vol_change = df['Vol_Change'].mean()
-                                        avg_volatility = df['Volatility'].mean()
-                                        
-                                        predicted_returns = []
-                                        for _ in range(future_steps):
-                                            pred_df = pd.DataFrame([[curr_ret, curr_lag1_ret, curr_lag2_ret, avg_vol_change, avg_volatility]], 
-                                                                   columns=['Return', 'Lag1_Ret', 'Lag2_Ret', 'Vol_Change', 'Volatility'])
-                                            pred_ret = model.predict(pred_df)[0]
-                                            predicted_returns.append(pred_ret)
+                                        if len(df) < 5:
+                                            st.error("Data collapsed after calculating technical features. Cannot train model.")
+                                        else:
+                                            X = df[['Return', 'Lag1_Ret', 'Lag2_Ret', 'Vol_Change', 'Volatility']]
+                                            y = df['Target_Return']
                                             
-                                            # Shift lags for next recursive step
-                                            curr_lag2_ret = curr_lag1_ret
-                                            curr_lag1_ret = curr_ret
-                                            curr_ret = float(pred_ret)
+                                            # 3. Train XGBoost
+                                            model = XGBRegressor(n_estimators=100, learning_rate=0.03, max_depth=3, random_state=42)
+                                            model.fit(X, y)
                                             
-                                        # 5. Reconstruct the Price Curve from Predicted Returns
-                                        last_real_price = df['Close'].iloc[-1]
-                                        pred_prices = []
-                                        for ret in predicted_returns:
-                                            next_price = last_real_price * (1 + ret)
-                                            pred_prices.append(next_price)
-                                            last_real_price = next_price
+                                            # 4. Iterative Forecasting out 25 steps
+                                            future_steps = 25
+                                            curr_ret = float(df['Return'].iloc[-1])
+                                            curr_lag1_ret = float(df['Lag1_Ret'].iloc[-1])
+                                            curr_lag2_ret = float(df['Lag2_Ret'].iloc[-1])
+                                            avg_vol_change = float(df['Vol_Change'].mean())
+                                            avg_volatility = float(df['Volatility'].mean())
                                             
-                                        # 6. Render the Chart
-                                        pred_fig = go.Figure()
-                                        hist_plot = df.tail(50)
-                                        pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
-                                        pred_x = np.arange(len(hist_plot) - 1, len(hist_plot) + future_steps)
-                                        pred_y = [hist_plot['Close'].iloc[-1]] + pred_prices
-                                        
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='XGBoost Forecast', line=dict(color='#00E676', width=3, dash='dash')))
-                                        
-                                        # Realistic expanding confidence interval based on volatility
-                                        std_dev = df['Close'].tail(20).std()
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y + (std_dev * 1.5) for y in pred_y], line=dict(color='rgba(0, 230, 118, 0.2)'), showlegend=False))
-                                        pred_fig.add_trace(go.Scatter(x=pred_x, y=[y - (std_dev * 1.5) for y in pred_y], fill='tonexty', fillcolor='rgba(0, 230, 118, 0.1)', line=dict(color='rgba(0, 230, 118, 0.2)'), name='Confidence Zone'))
-                                        
-                                        pred_fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, title=f"{target_symbol} Stationary XGBoost Projection")
-                                        st.plotly_chart(pred_fig, use_container_width=True)
-                                        st.success(f"Forecast Complete. Projected End Price: ₹{round(pred_prices[-1], 2)}")
-                                    else:
-                                        st.error("Not enough intraday data for this asset to train the model.")
-                                except ImportError:
-                                    st.error("❌ XGBoost is not installed. Please run `pip install xgboost` locally and add it to your requirements.txt for Streamlit Cloud.")
+                                            predicted_returns = []
+                                            for _ in range(future_steps):
+                                                pred_df = pd.DataFrame([[curr_ret, curr_lag1_ret, curr_lag2_ret, avg_vol_change, avg_volatility]], 
+                                                                       columns=['Return', 'Lag1_Ret', 'Lag2_Ret', 'Vol_Change', 'Volatility'])
+                                                pred_ret = float(model.predict(pred_df)[0])
+                                                predicted_returns.append(pred_ret)
+                                                
+                                                # Shift lags for next recursive step
+                                                curr_lag2_ret = curr_lag1_ret
+                                                curr_lag1_ret = curr_ret
+                                                curr_ret = pred_ret
+                                                
+                                            # 5. Reconstruct the Price Curve using the ORIGINAL dataset's last price
+                                            last_real_price = float(intra_data['Close'].iloc[-1])
+                                            pred_prices = []
+                                            for ret in predicted_returns:
+                                                next_price = last_real_price * (1 + ret)
+                                                pred_prices.append(next_price)
+                                                last_real_price = next_price
+                                                
+                                            # 6. Render the Chart
+                                            pred_fig = go.Figure()
+                                            hist_plot = intra_data.tail(50)
+                                            pred_fig.add_trace(go.Scatter(x=np.arange(len(hist_plot)), y=hist_plot['Close'], mode='lines', name='Historical 15m', line=dict(color='#FFFFFF', width=2)))
+                                            
+                                            pred_x = np.arange(len(hist_plot) - 1, len(hist_plot) + future_steps)
+                                            pred_y = [hist_plot['Close'].iloc[-1]] + pred_prices
+                                            
+                                            pred_fig.add_trace(go.Scatter(x=pred_x, y=pred_y, mode='lines', name='XGBoost Forecast', line=dict(color='#00E676', width=3, dash='dash')))
+                                            
+                                            std_dev = intra_data['Close'].tail(20).std()
+                                            pred_fig.add_trace(go.Scatter(x=pred_x, y=[y + (std_dev * 1.5) for y in pred_y], line=dict(color='rgba(0, 230, 118, 0.2)'), showlegend=False))
+                                            pred_fig.add_trace(go.Scatter(x=pred_x, y=[y - (std_dev * 1.5) for y in pred_y], fill='tonexty', fillcolor='rgba(0, 230, 118, 0.1)', line=dict(color='rgba(0, 230, 118, 0.2)'), name='Confidence Zone'))
+                                            
+                                            pred_fig.update_layout(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', height=400, title=f"{target_symbol} Stationary XGBoost Projection")
+                                            st.plotly_chart(pred_fig, use_container_width=True)
+                                            st.success(f"Forecast Complete. Projected End Price: ₹{round(pred_prices[-1], 2)}")
                                 except Exception as e:
                                     st.error(f"ML Model Error: {e}")
                     
