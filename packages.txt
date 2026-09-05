@@ -1,0 +1,6 @@
+build-essential
+libpq-dev
+libssl-dev
+libffi-dev
+rustc
+cargo

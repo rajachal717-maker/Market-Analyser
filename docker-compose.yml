@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: jarvis
+      POSTGRES_PASSWORD: securepassword
+      POSTGRES_DB: terminaldb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build: .
+    command: uvicorn backend:app --host 0.0.0.0 --port 8000
+    environment:
+      - DATABASE_URL=postgresql://jarvis:securepassword@db:5432/terminaldb
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  frontend:
+    build: .
+    command: streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+    environment:
+      - DATABASE_URL=postgresql://jarvis:securepassword@db:5432/terminaldb
+      # If you have an API key, you can pass it in your terminal when you run docker
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-} 
+    ports:
+      - "8501:8501"
+    depends_on:
+      - db
+      - backend
+
+volumes:
+  pgdata:
