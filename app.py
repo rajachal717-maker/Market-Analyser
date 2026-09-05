@@ -2,6 +2,7 @@ import os
 import io
 import time
 import asyncio
+import sqlite3
 import hashlib
 from datetime import datetime, timedelta
 
@@ -12,32 +13,28 @@ from streamlit_option_menu import option_menu
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-import psycopg2
 
 # =====================================================================
-# 🗄️ PRODUCTION POSTGRESQL BACKEND (SUPABASE)
+# 🗄️ LOCAL SQLITE BACKEND (INSTANT BOOT)
 # =====================================================================
-try:
-    DB_URI = st.secrets["DATABASE_URL"]
-except:
-    DB_URI = os.environ.get("DATABASE_URL")
+if os.path.exists('/mount/src/'):
+    DB_PATH = "/tmp/market_data.db"
+else:
+    DB_PATH = "market_data.db"
 
 def get_db_connection():
-    if not DB_URI:
-        st.error("DATABASE_URL missing from secrets/environment. Add it to .env or Streamlit Secrets.")
-        st.stop()
-    return psycopg2.connect(DB_URI)
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 def init_db():
     conn = get_db_connection()
-    conn.autocommit = True
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, email TEXT UNIQUE, password TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT UNIQUE, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS practice_wallets (user_id INTEGER PRIMARY KEY, balance REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id SERIAL PRIMARY KEY, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS trade_journal (id SERIAL PRIMARY KEY, user_id INTEGER, timestamp TIMESTAMP, ticker TEXT, action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (id SERIAL PRIMARY KEY, user_id INTEGER, ticker TEXT, target_price REAL, condition TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS archived_trade_journal (id SERIAL PRIMARY KEY, user_id INTEGER, timestamp TIMESTAMP, ticker TEXT, action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS practice_holdings (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, quantity INTEGER, avg_price REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS trade_journal (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, timestamp TEXT, ticker TEXT, action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS price_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, ticker TEXT, target_price REAL, condition TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS archived_trade_journal (id INTEGER PRIMARY KEY, user_id INTEGER, timestamp TEXT, ticker TEXT, action TEXT, quantity INTEGER, price REAL, total_value REAL)''')
+    conn.commit()
     conn.close()
 
 init_db()
@@ -48,8 +45,8 @@ def get_or_create_default_user():
     c.execute("SELECT id, email FROM users WHERE id = 1")
     user = c.fetchone()
     if not user:
-        c.execute("INSERT INTO users (id, email, password) VALUES (1, 'quant@institutional.terminal', 'local') ON CONFLICT (id) DO NOTHING")
-        c.execute("INSERT INTO practice_wallets (user_id, balance) VALUES (1, 1000000.00) ON CONFLICT (user_id) DO NOTHING")
+        c.execute("INSERT OR IGNORE INTO users (id, email, password) VALUES (1, 'quant@institutional.terminal', 'local')")
+        c.execute("INSERT OR IGNORE INTO practice_wallets (user_id, balance) VALUES (1, 1000000.00)")
         conn.commit()
         user = (1, 'quant@institutional.terminal')
     conn.close()
@@ -72,110 +69,28 @@ THEME_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-/* Global Layout & Pitch Black Background */
-html, body, [class*="css"], .stApp { 
-    font-family: 'Inter', sans-serif; 
-    background-color: #000000 !important; 
-    color: #FFFFFF; 
-}
+html, body, [class*="css"], .stApp { font-family: 'Inter', sans-serif; background-color: #000000 !important; color: #FFFFFF; }
 header { background-color: transparent !important; }
+[data-testid="stSidebar"] { background-color: #0E0E12 !important; border-right: 1px solid #1C1C21; }
 
-/* Sidebar Styling (Dark Grey) */
-[data-testid="stSidebar"] { 
-    background-color: #0E0E12 !important; 
-    border-right: 1px solid #1C1C21; 
-}
+.stTextInput>div>div>input, .stSelectbox>div>div>div, .stNumberInput>div>div>input { background-color: #121214 !important; color: #FFFFFF !important; border: 1px solid #27272A !important; border-radius: 8px !important; padding: 12px 16px !important; font-weight: 500; transition: all 0.2s ease; }
+.stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus { border-color: #A855F7 !important; box-shadow: 0 0 0 1px #A855F7 !important; }
 
-/* Inputs & Form Elements (Dark Pills) */
-.stTextInput>div>div>input, .stSelectbox>div>div>div, .stNumberInput>div>div>input { 
-    background-color: #121214 !important; 
-    color: #FFFFFF !important; 
-    border: 1px solid #27272A !important; 
-    border-radius: 8px !important; 
-    padding: 12px 16px !important;
-    font-weight: 500;
-    transition: all 0.2s ease;
-}
-.stTextInput>div>div>input:focus, .stSelectbox>div>div>div:focus {
-    border-color: #A855F7 !important;
-    box-shadow: 0 0 0 1px #A855F7 !important;
-}
+button[kind="primary"] { background: linear-gradient(90deg, #9333EA 0%, #D946EF 100%) !important; color: white !important; border: none !important; border-radius: 50px !important; font-weight: 600 !important; font-size: 15px !important; padding: 10px 24px !important; box-shadow: 0 4px 14px rgba(217, 70, 239, 0.3) !important; transition: transform 0.2s ease, box-shadow 0.2s ease !important; }
+button[kind="primary"]:hover { transform: translateY(-2px) !important; box-shadow: 0 6px 20px rgba(217, 70, 239, 0.5) !important; }
 
-/* Primary Button Override (Neon Purple/Pink Gradient) */
-button[kind="primary"] {
-    background: linear-gradient(90deg, #9333EA 0%, #D946EF 100%) !important;
-    color: white !important;
-    border: none !important;
-    border-radius: 50px !important; 
-    font-weight: 600 !important;
-    font-size: 15px !important;
-    padding: 10px 24px !important;
-    box-shadow: 0 4px 14px rgba(217, 70, 239, 0.3) !important;
-    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-}
-button[kind="primary"]:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 6px 20px rgba(217, 70, 239, 0.5) !important;
-}
+button[kind="secondary"] { background-color: #18181B !important; color: #E3E3E3 !important; border: 1px solid #27272A !important; border-radius: 8px !important; font-weight: 500 !important; }
+button[kind="secondary"]:hover { border-color: #A1A1AA !important; }
 
-/* Secondary Button Override */
-button[kind="secondary"] {
-    background-color: #18181B !important;
-    color: #E3E3E3 !important;
-    border: 1px solid #27272A !important;
-    border-radius: 8px !important;
-    font-weight: 500 !important;
-}
-button[kind="secondary"]:hover {
-    border-color: #A1A1AA !important;
-}
+div[data-testid="metric-container"] { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0px !important; }
+[data-testid="stMetricLabel"] { color: #A1A1AA !important; font-size: 13px !important; font-weight: 500 !important; }
+[data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 36px !important; font-weight: 700 !important; letter-spacing: -1px; }
+[data-testid="stMetricDelta"] { font-size: 14px !important; font-weight: 600 !important; padding: 4px 8px !important; border-radius: 4px !important; }
+[data-testid="stMetricDelta"] > div:first-child { background-color: rgba(0, 230, 118, 0.15) !important; color: #00E676 !important; padding: 2px 8px; border-radius: 12px; }
 
-/* Invisible Metric Containers */
-div[data-testid="metric-container"] { 
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    padding: 0px !important; 
-}
-[data-testid="stMetricLabel"] { 
-    color: #A1A1AA !important; 
-    font-size: 13px !important; 
-    font-weight: 500 !important;
-}
-[data-testid="stMetricValue"] { 
-    color: #FFFFFF !important; 
-    font-size: 36px !important; 
-    font-weight: 700 !important; 
-    letter-spacing: -1px;
-}
-[data-testid="stMetricDelta"] {
-    font-size: 14px !important;
-    font-weight: 600 !important;
-    padding: 4px 8px !important;
-    border-radius: 4px !important;
-}
-[data-testid="stMetricDelta"] > div:first-child {
-    background-color: rgba(0, 230, 118, 0.15) !important;
-    color: #00E676 !important;
-    padding: 2px 8px;
-    border-radius: 12px;
-}
+.streamlit-expanderHeader { background-color: #0E0E12 !important; border-radius: 8px !important; border: 1px solid #1C1C21 !important; font-weight: 600 !important; }
+div[data-testid="stExpanderDetails"] { border: 1px solid #1C1C21; border-top: none; border-radius: 0 0 8px 8px; background-color: #000000; }
 
-/* Expander / Accodions */
-.streamlit-expanderHeader {
-    background-color: #0E0E12 !important;
-    border-radius: 8px !important;
-    border: 1px solid #1C1C21 !important;
-    font-weight: 600 !important;
-}
-div[data-testid="stExpanderDetails"] {
-    border: 1px solid #1C1C21;
-    border-top: none;
-    border-radius: 0 0 8px 8px;
-    background-color: #000000;
-}
-
-/* Custom Tabs */
 .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; border: none; }
 .stTabs [data-baseweb="tab"] { height: 40px; background-color: #0E0E12; border-radius: 8px; border: 1px solid #27272A; color: #A1A1AA; padding: 0 20px; font-weight: 600; font-size: 14px; }
 .stTabs [aria-selected="true"] { background-color: rgba(147, 51, 234, 0.1) !important; color: #D946EF !important; border: 1px solid rgba(217, 70, 239, 0.5) !important; }
@@ -216,8 +131,6 @@ if "nse_watchlist" not in st.session_state:
 # 🧭 SIDEBAR NAVIGATION
 # =====================================================================
 with st.sidebar:
-    user_email = st.session_state.user.get("email", "Active User")
-    
     st.markdown(f"""
         <div style="background: #121216; border: 1px solid #1C1C21; border-radius: 16px; padding: 16px; display: flex; align-items: center; margin-bottom: 24px;">
             <div style="width: 44px; height: 44px; border-radius: 12px; background: #FFFFFF; display: flex; justify-content: center; align-items: center; color: #000; font-weight: 800; font-size: 20px; margin-right: 14px;">Q</div>
@@ -260,12 +173,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # =====================================================================
-# MODULE ROUTING (WITH FULL QUANTITATIVE LOGIC)
+# MODULE ROUTING
 # =====================================================================
 
 if selected_page == "AI Assistant":
     if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. is online. PostgreSQL linked. What's the target?"}]
+        st.session_state.messages = [{"role": "assistant", "content": "J.A.R.V.I.S. is online. What's the target?"}]
     for message in st.session_state.messages:
         with st.chat_message(message["role"], avatar="⚡" if message["role"] == "assistant" else "👤"):
             st.markdown(message["content"])
@@ -281,11 +194,10 @@ if selected_page == "AI Assistant":
                     else:
                         conn = get_db_connection()
                         c = conn.cursor()
-                        c.execute("SELECT balance FROM practice_wallets WHERE user_id = %s", (st.session_state.user['id'],))
+                        c.execute("SELECT balance FROM practice_wallets WHERE user_id = ?", (st.session_state.user['id'],))
                         bal_row = c.fetchone()
                         balance = bal_row[0] if bal_row else 0.0
-                        
-                        c.execute("SELECT ticker, quantity FROM practice_holdings WHERE user_id = %s", (st.session_state.user['id'],))
+                        c.execute("SELECT ticker, quantity FROM practice_holdings WHERE user_id = ?", (st.session_state.user['id'],))
                         holdings = c.fetchall()
                         conn.close()
                         
@@ -343,7 +255,7 @@ elif selected_page == "Live Market Feed":
                             if st.form_submit_button("Save Alert"):
                                 conn = get_db_connection()
                                 c = conn.cursor()
-                                c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (%s, %s, %s, %s)", (st.session_state.user['id'], exact_symbol, target_p, "CROSS"))
+                                c.execute("INSERT INTO price_alerts (user_id, ticker, target_price, condition) VALUES (?, ?, ?, ?)", (st.session_state.user['id'], exact_symbol, target_p, "CROSS"))
                                 conn.commit()
                                 conn.close()
                                 st.success(f"Alert set for {exact_symbol}!")
@@ -360,10 +272,10 @@ elif selected_page == "Live Market Feed":
                 st.session_state.nse_watchlist = [t.strip().upper() for t in wl.split(",") if t.strip()]
                 st.rerun()
     with c2:
-        st.markdown("###### Active Triggers & Scanner")
+        st.markdown("###### Active Triggers")
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT id, ticker, target_price FROM price_alerts WHERE user_id = %s", (st.session_state.user['id'],))
+        c.execute("SELECT id, ticker, target_price FROM price_alerts WHERE user_id = ?", (st.session_state.user['id'],))
         alerts = c.fetchall()
         if not alerts: 
             st.info("No active alerts.")
@@ -372,25 +284,10 @@ elif selected_page == "Live Market Feed":
                 c_a, c_b = st.columns([3, 1])
                 c_a.markdown(f"**{atick}**  →  <span style='color:#00E676'>₹{apri}</span>", unsafe_allow_html=True)
                 if c_b.button("Del", key=f"del_al_{aid}"):
-                    c.execute("DELETE FROM price_alerts WHERE id = %s", (aid,))
+                    c.execute("DELETE FROM price_alerts WHERE id = ?", (aid,))
                     conn.commit()
                     st.rerun()
         conn.close()
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Start Background Scanner", type="primary", use_container_width=True):
-            if not alerts: 
-                st.warning("Set a target price alert first.")
-            else:
-                try:
-                    import requests
-                    res = requests.get("http://localhost:8000/health", timeout=3)
-                    if res.status_code == 200:
-                        st.success("⚡ Handed over to FastAPI Engine. You can close this tab.")
-                    else:
-                        st.error("Engine responded with an error.")
-                except requests.exceptions.ConnectionError:
-                    st.error("❌ FastAPI Engine offline. Start it using `uvicorn backend:app --reload`.")
 
 elif selected_page == "Screener & Diagnostics":
     st.markdown("<p style='font-size: 14px; color: #8A8F98; margin-bottom: 8px;'>Enter Ticker</p>", unsafe_allow_html=True)
@@ -441,7 +338,6 @@ elif selected_page == "Screener & Diagnostics":
 
                     st.markdown("<br>", unsafe_allow_html=True)
                     
-                    # 1. STATIONARY XGBOOST ENGINE 
                     with st.expander("🤖 Advanced ML Forecaster (Stationary XGBoost)", expanded=False):
                         if st.button("Generate ML Prediction", type="primary"):
                             with st.spinner("Training Stationary XGBoost Model..."):
@@ -505,26 +401,6 @@ elif selected_page == "Screener & Diagnostics":
                                             st.success(f"Forecast Complete. Target: ₹{round(pred_prices[-1], 2)}")
                                 except Exception as e: st.error(f"ML Model Error: {e}")
 
-                    # 2. OPTIONS SENTIMENT
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    with st.expander("📊 Options Sentiment (PCR & IV)", expanded=False):
-                        if st.button("Run Derivatives Scan"):
-                            with st.spinner("Connecting to NSE..."):
-                                try:
-                                    from nsepython import option_chain
-                                    payload = option_chain(target_symbol) 
-                                    if payload and 'filtered' in payload:
-                                        ce_oi = payload['filtered']['CE']['totOI']
-                                        pe_oi = payload['filtered']['PE']['totOI']
-                                        pcr = pe_oi / ce_oi if ce_oi > 0 else 0
-                                        c1, c2 = st.columns(2)
-                                        c1.metric("Put-Call Ratio (PCR)", f"{pcr:.2f}")
-                                        if pcr > 1: c1.success("📈 Bullish Sentiment")
-                                        else: c1.error("📉 Bearish Sentiment")
-                                    else: st.warning("No options data.")
-                                except Exception as e: st.error(f"Options Error: {e}")
-                                    
-                    # 3. SECTOR CORRELATION
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.expander("🔗 Sector Correlation", expanded=False):
                         col_c1, col_c2 = st.columns([1, 3])
@@ -617,7 +493,6 @@ elif selected_page == "Strategy Backtester":
                         fig.update_xaxes(gridcolor='#1C1C21')
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # AI RISK ASSESSMENT
                         with st.expander("🤖 AI Risk Assessment"):
                             if st.button("Generate Risk Report"):
                                 api_key = os.environ.get("NVIDIA_API_KEY")
@@ -627,45 +502,12 @@ elif selected_page == "Strategy Backtester":
                                     res = llm.invoke(f"Assess EMA strategy on {b_ticker}: {len(trades)} trades, {win_r}% win rate, {net_ret}% ROI. Professional brief.").content
                                     st.info(res)
                 except Exception as e: st.error(f"Error: {e}")
-                
-    with tab_rebalance:
-        st.markdown("<br><p style='color: #8A8F98; font-size: 14px;'>Calculate optimal target weights for your institutional watchlists.</p>", unsafe_allow_html=True)
-        col_d1, col_d2 = st.columns(2)
-        start_d = col_d1.date_input("Start Date")
-        end_d = col_d2.date_input("End Date")
-        
-        if st.button("Run Rebalancer", type="primary"):
-            try:
-                from data_loader import fetch_stock_data
-                from strategy import RebalancingStrategy
-                tickers = ['VMART', 'NOCIL', 'RELIANCE', 'TCS']
-                with st.spinner("Calculating weights..."):
-                    data = fetch_stock_data(tickers, start_date=str(start_d), end_date=str(end_d))
-                    if not data.empty:
-                        strategy = RebalancingStrategy(tickers)
-                        weights = strategy.calculate_weights()
-                        cols = st.columns(len(tickers))
-                        for i, (t, w) in enumerate(weights.items()): cols[i].metric(t, f"{w:.2%}")
-            except Exception as e: st.error(f"Error: {e}")
 
 elif selected_page == "Practice Wallet & Journal":
     tab_exec, tab_analytics, tab_journal = st.tabs(["🚀 Live Execution", "📊 Analytics", "📜 Journal"])
     
     with tab_exec:
         st.markdown("<br>", unsafe_allow_html=True)
-        with st.expander("🔑 Zerodha API Config", expanded=False):
-            col_k1, col_k2, col_k3 = st.columns(3)
-            with col_k1: api_key = st.text_input("Kite API Key", type="password")
-            with col_k2: api_secret = st.text_input("Kite API Secret", type="password")
-            with col_k3: request_token = st.text_input("Request Token")
-            if st.button("Authenticate", width="stretch"):
-                try:
-                    from kiteconnect import KiteConnect
-                    data = KiteConnect(api_key=api_key).generate_session(request_token, api_secret=api_secret)
-                    st.session_state.kite_access_token, st.session_state.kite_api_key = data["access_token"], api_key
-                    st.success("✅ Auth Success!")
-                except Exception as e: st.error(f"Auth failed: {e}")
-
         col_trade, col_port = st.columns([1, 2])
         with col_trade:
             st.markdown("###### Fire Order")
@@ -677,54 +519,31 @@ elif selected_page == "Practice Wallet & Journal":
                 order_type = st.selectbox("Type", ["MARKET", "LIMIT"])
                 limit_price = st.number_input("Limit Price", min_value=0.0, step=0.5)
                 
-                if st.form_submit_button("🔥 SUBMIT LIVE ORDER", type="primary", width="stretch") and t_ticker:
-                    if "kite_access_token" not in st.session_state: st.error("Authenticate first.")
-                    else:
-                        try:
-                            from kiteconnect import KiteConnect
-                            kite = KiteConnect(api_key=st.session_state.kite_api_key)
-                            kite.set_access_token(st.session_state.kite_access_token)
-                            order_id = kite.place_order(
-                                tradingsymbol=t_ticker, exchange=kite.EXCHANGE_NSE if t_exch=="NSE" else kite.EXCHANGE_BSE,
-                                transaction_type=kite.TRANSACTION_TYPE_BUY if t_action=="BUY" else kite.TRANSACTION_TYPE_SELL,
-                                quantity=int(t_qty), variety=kite.VARIETY_REGULAR, product=kite.PRODUCT_MIS,
-                                order_type=kite.ORDER_TYPE_MARKET if order_type=="MARKET" else kite.ORDER_TYPE_LIMIT,
-                                price=float(limit_price) if order_type=="LIMIT" else None
-                            )
-                            st.success(f"Order Placed! ID: {order_id}")
-                            
-                            conn = get_db_connection()
-                            c = conn.cursor()
-                            c.execute("INSERT INTO trade_journal (user_id, timestamp, ticker, action, quantity, price) VALUES (%s, %s, %s, %s, %s, %s)",
-                                      (st.session_state.user['id'], datetime.now(), t_ticker, f"LIVE_{t_action}", t_qty, limit_price))
-                            conn.commit()
-                            conn.close()
-                        except Exception as e: st.error(f"Execution Error: {e}")
+                if st.form_submit_button("🔥 SUBMIT TEST ORDER", type="primary", width="stretch") and t_ticker:
+                    try:
+                        conn = get_db_connection()
+                        c = conn.cursor()
+                        c.execute("INSERT INTO trade_journal (user_id, timestamp, ticker, action, quantity, price) VALUES (?, ?, ?, ?, ?, ?)",
+                                  (st.session_state.user['id'], datetime.now().strftime("%Y-%m-%d %H:%M:%S"), t_ticker, f"TEST_{t_action}", t_qty, limit_price))
+                        conn.commit()
+                        conn.close()
+                        st.success("Test order successfully logged to Journal.")
+                    except Exception as e: st.error(f"Execution Error: {e}")
 
         with col_port:
             st.markdown("###### Live Positions")
-            if st.button("Refresh Holdings"):
-                if "kite_access_token" in st.session_state:
-                    try:
-                        from kiteconnect import KiteConnect
-                        kite = KiteConnect(api_key=st.session_state.kite_api_key)
-                        kite.set_access_token(st.session_state.kite_access_token)
-                        positions = kite.positions().get('net', [])
-                        if positions: st.dataframe(pd.DataFrame(positions)[['tradingsymbol', 'quantity', 'average_price', 'last_price', 'pnl']], hide_index=True)
-                        else: st.info("No open positions.")
-                    except Exception as e: st.error(f"Error: {e}")
-                else: st.warning("Authenticate to view.")
+            st.info("Kite API credentials disabled for testing phase.")
                     
     with tab_analytics:
         st.markdown("<br>", unsafe_allow_html=True)
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT balance FROM practice_wallets WHERE user_id = %s", (st.session_state.user['id'],))
+        c.execute("SELECT balance FROM practice_wallets WHERE user_id = ?", (st.session_state.user['id'],))
         bal_row = c.fetchone()
         current_balance = bal_row[0] if bal_row else 1000000.00
         net_pnl = current_balance - 1000000.00
         
-        c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = %s", (st.session_state.user['id'],))
+        c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = ?", (st.session_state.user['id'],))
         total_trades = c.fetchone()[0]
         conn.close()
         
@@ -732,27 +551,12 @@ elif selected_page == "Practice Wallet & Journal":
         m1.metric("Available Capital", f"₹{current_balance:,.2f}")
         m2.metric("Net Realized P&L", f"₹{net_pnl:,.2f}", delta=f"{(net_pnl/1000000)*100:.2f}%")
         m3.metric("Total Trades", total_trades)
-        
-        st.markdown("<hr style='border-color: #1C1C21; margin: 24px 0;'>", unsafe_allow_html=True)
-        st.markdown("###### 🗺️ Exposure Heatmap")
-        if "kite_access_token" in st.session_state:
-            try:
-                positions = KiteConnect(api_key=st.session_state.kite_api_key).positions().get('net', [])
-                if positions:
-                    hm_df = pd.DataFrame(positions)
-                    hm_df['P&L Status'] = hm_df['pnl'].apply(lambda x: 'Profit' if x > 0 else 'Loss')
-                    hm_df['Abs P&L'] = hm_df['pnl'].abs()
-                    fig = px.treemap(hm_df, path=[px.Constant("Portfolio"), 'P&L Status', 'tradingsymbol'], values='Abs P&L', color='pnl', color_continuous_scale=['#FF1744', '#121214', '#00E676'], color_continuous_midpoint=0)
-                    fig.update_layout(template='plotly_dark', margin=dict(t=20, l=0, r=0, b=0), height=450, paper_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig, use_container_width=True)
-            except: pass
-        else: st.info("Connect API to view Heatmap.")
 
     with tab_journal:
         st.markdown("<br>", unsafe_allow_html=True)
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute("SELECT timestamp, ticker, action, quantity, price FROM trade_journal WHERE user_id = %s ORDER BY id DESC", (st.session_state.user['id'],))
+        c.execute("SELECT timestamp, ticker, action, quantity, price FROM trade_journal WHERE user_id = ? ORDER BY id DESC", (st.session_state.user['id'],))
         j_rows = c.fetchall()
         conn.close()
         if j_rows: st.dataframe(pd.DataFrame(j_rows, columns=["Time", "Asset", "Action", "Qty", "Price"]), width="stretch", hide_index=True)
@@ -761,14 +565,15 @@ elif selected_page == "Practice Wallet & Journal":
 elif selected_page == "DB Admin Vault":
     user_id = st.session_state.user['id']
     st.markdown("###### System Health")
-    st.metric("Cloud DB Status", "Connected (Supabase PG)")
+    try: st.metric("Local DB Size", f"{os.path.getsize(DB_PATH)/1024:.2f} KB")
+    except: pass
     
     st.markdown("<hr style='border-color: #1C1C21; margin: 24px 0;'>", unsafe_allow_html=True)
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = %s", (user_id,))
+    c.execute("SELECT COUNT(*) FROM trade_journal WHERE user_id = ?", (user_id,))
     active_t = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM archived_trade_journal WHERE user_id = %s", (user_id,))
+    c.execute("SELECT COUNT(*) FROM archived_trade_journal WHERE user_id = ?", (user_id,))
     archived_t = c.fetchone()[0]
     
     col_p1, col_p2 = st.columns(2)
@@ -777,7 +582,7 @@ elif selected_page == "DB Admin Vault":
 
     st.markdown("<hr style='border-color: #1C1C21; margin: 24px 0;'>", unsafe_allow_html=True)
     st.markdown("###### 📥 Export")
-    c.execute("SELECT * FROM trade_journal WHERE user_id = %s", (user_id,))
+    c.execute("SELECT * FROM trade_journal WHERE user_id = ?", (user_id,))
     rows = c.fetchall()
     if rows:
         st.download_button("📥 Download CSV", pd.DataFrame(rows).to_csv(index=False).encode('utf-8'), f"export_{datetime.now().strftime('%Y%m%d')}.csv", "text/csv")
@@ -787,8 +592,8 @@ elif selected_page == "DB Admin Vault":
         confirm = st.text_input("Type 'RESET' to wipe data:")
         if st.button("🔥 Execute Reset", type="primary"):
             if confirm == "RESET":
-                c.execute("UPDATE practice_wallets SET balance = 1000000.00 WHERE user_id = %s", (user_id,))
-                c.execute("DELETE FROM trade_journal WHERE user_id = %s", (user_id,))
+                c.execute("UPDATE practice_wallets SET balance = 1000000.00 WHERE user_id = ?", (user_id,))
+                c.execute("DELETE FROM trade_journal WHERE user_id = ?", (user_id,))
                 conn.commit()
                 st.success("Wipe complete.")
                 time.sleep(1); st.rerun()
